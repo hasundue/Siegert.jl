@@ -1,0 +1,21 @@
+AGENTS guide for this repo (Julia + Nix)
+
+- Environment: Julia 1.12.x; use Nix dev shell. Enter with: `nix develop`.
+- Setup: `julia --project -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'`.
+- Build (rarely needed): `julia --project -e 'using Pkg; Pkg.build()'`.
+- Lint/format (Nix files): `treefmt -c` to check, `treefmt` to fix; runs via pre-commit hooks in the dev shell.
+- Julia formatting: no formatter configured; follow guidelines below and avoid large stylistic diffs.
+- Run tests (all): `julia --project -e 'using Pkg; Pkg.test()'`.
+- Single test file (direct): `julia --project test/<file>.jl`.
+- Single test via Pkg (if `runtests.jl` forwards ARGS): `julia --project -e 'using Pkg; Pkg.test(; test_args=["test/<file>.jl"])'`.
+- Name-based filtering (manual): `julia --project -e 'using Test; Test.@testset filter = t->occursin("NAME", string(t)); include("test/runtests.jl")'`.
+- Imports: group stdlib, external, then local; one per line; prefer `using` and qualify on conflicts; alphabetize groups.
+- Formatting: 2-space indent; keep lines ≲100 cols; trailing commas on multiline; one export per line; docstrings with triple quotes.
+- Types: write generic code; avoid over-annotating locals; annotate struct fields; prefer concrete element types in containers; avoid globals; use multiple dispatch.
+- Naming: Modules/Types CamelCase; functions/vars snake_case; predicates `is_`/`has_`; constants UPPER_CASE.
+- Errors: validate inputs; `throw(ArgumentError/DomainError/MethodError)` as appropriate; use `try/catch` sparingly; use `@assert` for internal invariants only.
+- Docs: every public API has a docstring (signature, brief, example, edge cases/units).
+- Nix: keep `flake.nix` formatted; `treefmt` uses `nixfmt`. Don’t bypass hooks; run `treefmt` before commits.
+- CI/local routine: `treefmt -c` then `julia --project -e 'using Pkg; Pkg.test()'` before pushing.
+- Cursor/Copilot: no `.cursor/`, `.cursorrules`, or `.github/copilot-instructions.md` found in this repo.
+- Keep changes minimal and focused; prefer small PRs with clear intent.

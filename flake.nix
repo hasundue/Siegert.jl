@@ -68,7 +68,7 @@
         {
           default = pkgs.mkShell {
             packages = with pkgs; [
-              julia
+              julia-bin
               treefmt
             ];
             shellHook = git-hooks.shellHook;
