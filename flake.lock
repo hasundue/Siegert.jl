@@ -79,7 +79,8 @@
       "inputs": {
         "git-hooks-nix": "git-hooks-nix",
         "nixpkgs": "nixpkgs",
-        "treefmt-nix": "treefmt-nix"
+        "treefmt-nix": "treefmt-nix",
+        "zotero-mcp-src": "zotero-mcp-src"
       }
     },
     "treefmt-nix": {
@@ -99,6 +100,22 @@
       "original": {
         "owner": "numtide",
         "repo": "treefmt-nix",
+        "type": "github"
+      }
+    },
+    "zotero-mcp-src": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1761310709,
+        "narHash": "sha256-I1DbuiWgE/F5BmRz2jOAwkNyUQe3xIS3s3ODU8A6IRE=",
+        "owner": "54yyyu",
+        "repo": "zotero-mcp",
+        "rev": "9242b77e1f6974d426f9f33ce7467acbae1b2333",
+        "type": "github"
+      },
+      "original": {
+        "owner": "54yyyu",
+        "repo": "zotero-mcp",
         "type": "github"
       }
     }

@@ -10,6 +10,10 @@
       url = "github:numtide/treefmt-nix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    zotero-mcp-src = {
+      url = "github:54yyyu/zotero-mcp";
+      flake = false;
+    };
   };
   outputs =
     {
@@ -17,6 +21,7 @@
       nixpkgs,
       git-hooks-nix,
       treefmt-nix,
+      zotero-mcp-src,
     }:
     let
       systems = [
@@ -75,12 +80,21 @@
               };
             };
           };
+          zotero-mcp = pkgs.writeShellScriptBin "zotero-mcp" ''
+            export LD_LIBRARY_PATH="${
+              pkgs.lib.makeLibraryPath [ pkgs.stdenv.cc.cc.lib ]
+            }''${LD_LIBRARY_PATH:+:}''$LD_LIBRARY_PATH"
+            exec ${pkgs.uv}/bin/uvx \
+              --python ${pkgs.python312}/bin/python3 \
+              --from ${zotero-mcp-src} zotero-mcp "$@"
+          '';
         in
         {
           default = pkgs.mkShell {
             packages = with pkgs; [
               julia-bin
               treefmt
+              zotero-mcp
             ];
             shellHook = git-hooks.shellHook;
           };

@@ -1,0 +1,12 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "zotero": {
+      "type": "local",
+      "command": ["zotero-mcp"],
+      "environment": {
+        "ZOTERO_LOCAL": "true"
+      }
+    }
+  }
+}
