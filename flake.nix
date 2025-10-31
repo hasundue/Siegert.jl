@@ -55,17 +55,16 @@
           system,
         }:
         let
+          julia = pkgs.julia_111-bin.withPackages [
+            "JuliaFormatter"
+          ];
           treefmt = lib.treefmt-nix.mkWrapper pkgs {
             programs.nixfmt.enable = true;
             settings.formatter.julia = {
-              command = "${pkgs.julia-bin}/bin/julia";
+              command = "${lib.getExe julia}";
               options = [
-                "--project"
                 "-e"
-                ''
-                  using JuliaFormatter
-                  JuliaFormatter.format(collect(ARGS))
-                ''
+                "using JuliaFormatter; JuliaFormatter.format(collect(ARGS))"
                 "--"
               ];
               includes = [ "*.jl" ];
@@ -92,7 +91,7 @@
         {
           default = pkgs.mkShell {
             packages = with pkgs; [
-              julia-bin
+              julia
               treefmt
               zotero-mcp
             ];
