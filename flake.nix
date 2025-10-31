@@ -51,8 +51,19 @@
         }:
         let
           treefmt = lib.treefmt-nix.mkWrapper pkgs {
-            programs.nixfmt = {
-              enable = true;
+            programs.nixfmt.enable = true;
+            settings.formatter.julia = {
+              command = "${pkgs.julia-bin}/bin/julia";
+              options = [
+                "--project"
+                "-e"
+                ''
+                  using JuliaFormatter
+                  JuliaFormatter.format(collect(ARGS))
+                ''
+                "--"
+              ];
+              includes = [ "*.jl" ];
             };
           };
           git-hooks = lib.git-hooks-nix.${system}.run {
