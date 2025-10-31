@@ -1,6 +1,5 @@
 using Test
-
-include(joinpath(@__DIR__, "..", "src", "jacobi.jl"))
+using Siegert
 
 # Simple composite Simpson integration on [a,b]
 function simpson(f, a, b; n = 2000)

@@ -1,5 +1,5 @@
 using Plots
-include(joinpath(@__DIR__, "..", "src", "jacobi.jl"))
+using Siegert
 
 # Example parameters
 N = 8

@@ -1,12 +1,3 @@
-using Jacobi
-using SpecialFunctions: gamma
-
-N = 8 # Demension of the basis
-l = 0 # Angular momentum quantum number
-
-# Parameters for Jacobi polynomials
-α = 0
-β = 2l
 
 """
 Squared L2 norm h_n of P_n^(α,β) on [-1,1] with weight (1-x)^α(1+x)^β.
