@@ -4,7 +4,7 @@
 - Julia + Nix project; keep changes minimal and focused; prefer small, clear PRs.
 
 ## Environment
-- Julia 1.12.x; enter dev shell with `nix develop`.
+- Julia 1.11.x; enter dev shell with `nix develop`.
 
 ## Setup
 - `julia --project -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'`.
