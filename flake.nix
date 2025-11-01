@@ -58,6 +58,7 @@
           # Use Julia 1.11 for compatibility with withPackages
           julia = pkgs.julia_111-bin.withPackages [
             "JuliaFormatter"
+            "Plots"
             "TestEnv"
           ];
           treefmt = lib.treefmt-nix.mkWrapper pkgs {

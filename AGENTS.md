@@ -24,6 +24,7 @@
 - All tests: `julia --project -e 'using Pkg; Pkg.test()'`.
 - Single file: `julia --project test/<file>.jl`.
 - Name filter: `using Test; Test.@testset filter = t -> occursin("NAME", string(t)); include("test/runtests.jl")`.
+- Prefer targeted runs while iterating. Example: `julia --project test/waves_tests.jl` instead of the full suite. Only run `Pkg.test()` before pushing.
 
 ## Code Style
 - 2-space indent; ≲100 cols; trailing commas on multiline; one export per line; triple-quoted docstrings.

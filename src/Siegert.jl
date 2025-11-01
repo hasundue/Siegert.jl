@@ -13,9 +13,19 @@ export jacobi_normsq,
     sps_matrices,
     sps_linearize_qep,
     sps_solve,
-    square_well_V
+    square_well_V,
+    s_square_well_l0,
+    s_from_eigs,
+    SPSData,
+    solve_sps,
+    scattering_matrix,
+    phase_shift,
+    outgoing_on_grid,
+    standing_wave_on_grid
 
 include("jacobi.jl")
 include("sps.jl")
+include("phase.jl")
+include("waves.jl")
 
 end
