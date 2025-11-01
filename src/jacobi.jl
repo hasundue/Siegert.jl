@@ -37,6 +37,8 @@ end
 """
 Return the Gauss–Jacobi nodes and weights for given N, α, β.
 The weights integrate functions under the measure (1-x)^α (1+x)^β dx.
+
+Returns `(z, λ)`.
 """
 function jacobi_gauss(N::Integer, α::Real, β::Real)
     N < 1 && throw(DomainError(N, "N must be ≥ 1"))
@@ -59,7 +61,11 @@ associated with the Gauss–Jacobi grid for (N, α, β).
 - Cardinality: ψ_i(z_j) = δ_{ij} / √Λ_j.
 - Orthonormality: ∫_{-1}^1 ψ_i(x) ψ_j(x) dx = δ_{ij}.
 
-Returns a vector of length N with callable functions ψ_i.
+Returns a tuple `(ψ, z, Λ)` where `ψ` is a vector of length N
+with callable basis functions, `z` are the Gauss–Jacobi nodes, and
+`Λ` are the discrete measures λ ./ ω at those nodes.
+
+Public API: prefer `jacobi_dvr_basis(N, l)` (α=0, β=2l).
 """
 jacobi_dvr_basis(N::Integer, l::Real) = jacobi_dvr_basis(N, 0.0, 2l)
 
@@ -70,7 +76,7 @@ function jacobi_dvr_basis(N::Integer, α::Real, β::Real)
     ω = jacobi_weight.(z, Ref(α), Ref(β))
     Λ = λ ./ ω
     coeffs = [sqrt(Λ[i]) * φ[n](z[i]) for i = 1:N, n = 1:N]
-    return [
+    ψ = [
         let row = view(coeffs, i, :)
             x -> begin
                 s = 0.0
@@ -81,4 +87,5 @@ function jacobi_dvr_basis(N::Integer, α::Real, β::Real)
             end
         end for i = 1:N
     ]
+    return ψ, z, Λ
 end

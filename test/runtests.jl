@@ -21,13 +21,8 @@ end
 @testset "Jacobi DVR basis" begin
     for l in (0, 1)
         for N in (3, 4)
-            ψ = jacobi_dvr_basis(N, l)
+            ψ, z, Λ = jacobi_dvr_basis(N, l)
             @test length(ψ) == N
-            α = 0.0
-            β = 2l
-            z, λ = jacobi_gauss(N, α, β)
-            ω = jacobi_weight.(z, Ref(α), Ref(β))
-            Λ = λ ./ ω
             # Cardinality on Gauss–Jacobi grid: ψ_i(z_j) = δ_ij / √Λ_j
             for i = 1:N, j = 1:N
                 val = ψ[i](z[j]) * sqrt(Λ[j])

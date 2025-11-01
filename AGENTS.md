@@ -11,6 +11,7 @@
 - Build rarely: `julia --project -e 'using Pkg; Pkg.build()'`.
 
 ## Workflow
+- Commit messages (pre-1.0): use `<scope>: body` style. Example: `dvr: return ψ, z, Λ from jacobi_dvr_basis; update tests/examples`.
 - Before pushing: `treefmt -c`, then `julia --project -e 'using Pkg; Pkg.test()'`.
 
 ## Testing
