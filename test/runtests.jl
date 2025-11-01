@@ -87,9 +87,26 @@ end
     end
 end
 
+@testset "Exact metric option" begin
+    for (N, l, a) in ((4, 0, 2.0), (6, 1, 3.0))
+        K̃1, ξ_diag, L1, H̃1, z1, Λ1, ψ1, r1 =
+            sps_matrices(N, l, a, square_well_V; exact_metric = false)
+        K̃2, ξ_exact, L2, H̃2, z2, Λ2, ψ2, r2 =
+            sps_matrices(N, l, a, square_well_V; exact_metric = true)
+        # Same grid and boundary
+        @test isapprox(z1, z2; atol = 0, rtol = 0)
+        @test isapprox(Λ1, Λ2; atol = 0, rtol = 0)
+        @test isapprox(L1, L2; atol = 1e-12, rtol = 0)
+        @test isapprox(r1, r2; atol = 0, rtol = 0)
+        # Exact metric should numerically coincide with DVR diagonal for r^2
+        @test isapprox(ξ_exact, Diagonal(r1 .^ 2); atol = 1e-12, rtol = 0)
+        @test isapprox(ξ_exact, ξ_diag; atol = 1e-12, rtol = 0)
+    end
+end
+
 @testset "QEP linearization (residual check)" begin
     N, l, a = 4, 0, 2.0
-    K̃, ξ, L, H̃, z, Λ, ψ, r = sps_matrices(N, l, a, square_well_V)
+    K̃, ξ, L, H̃, z, Λ, ψ, r = sps_matrices(N, l, a, square_well_V; exact_metric = true)
     A, B = sps_linearize_qep(H̃, ξ, L, a; b = 0.0)
     F = eigen(A, B)
     k = F.values

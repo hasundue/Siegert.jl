@@ -11,11 +11,16 @@
 #   derivatives of the L2-orthonormal Jacobi basis φ_n and Gauss–Jacobi
 #   quadrature on the x-domain, with the mapping r(x).
 #
+# Symbol mapping (paper → code):
+# - ρ (metric multiplying k²) → ξ (to avoid overloading ρ)
+# - Q(k) = H̃ − (b + i k a) L − k² ξ with H̃ = K̃ + U
+# - M = −ξ, C = −im a L, K = H̃ − b L (for linearization)
+#
 # Public API (initial):
-# - sps_matrices(N, l, a, V) -> (K̃, ξ, L, H̃, z, Λ, ψ, r)
+# - sps_matrices(N, l, a, V; exact_metric=false) -> (K̃, ξ, L, H̃, z, Λ, ψ, r)
 #   where V is a callable V(r)::Real.
 # - sps_linearize_qep(H̃, ξ, L, a; b=0.0) -> (A, B) such that A y = k B y
-# - sps_solve(N, l, a, V; b=0.0) -> (k, C, meta)
+# - sps_solve(N, l, a, V; b=0.0, exact_metric=false) -> (k, C, meta)
 
 const _ONE = 1.0
 
@@ -86,10 +91,14 @@ function _phi_vals_and_derivs(N::Integer, α::Real, β::Real)
 end
 
 # Build kinetic matrix K̃ in the DVR basis using
-# K = (1/a) ∫ (dψ/dx)(dψ/dx) dx and the mapping r(x)
-# FBR (φ) representation: K_FBR = (1/a) dΦ * Diag(Λ) * dΦ'
-# DVR coefficients S = Diag(√Λ) * Φ'
-# => K̃ = S * K_FBR * S'
+#
+# Derivation of the 1/a factor (from (C15)):
+# In a.u., T = −(1/2) d²/dr², and the bilinear form after one integration by parts is
+# (1/2) ∫_0^a (du/dr)(dv/dr) dr (boundary term is handled via L).
+# With r = a(1+x)/2, dr = (a/2) dx and d/dr = (2/a) d/dx, so
+# (1/2)∫ (du/dr)(dv/dr) dr = (1/a) ∫ (du/dx)(dv/dx) dx.
+# Discretize in the φ-basis using Gauss–Jacobi quadrature: K_FBR = (1/a) dΦ Diag(Λ) dΦ',
+# and map to DVR with S = Diag(√Λ) Φ': K̃ = S K_FBR S'.
 function _kinetic_dvr(N::Integer, l::Real, a::Real)
     α = 0.0
     β = 2l
@@ -101,8 +110,26 @@ function _kinetic_dvr(N::Integer, l::Real, a::Real)
     return K̃
 end
 
+# Generic multiplicative operator via FBR→DVR using Gauss–Jacobi quadrature.
+# Given g(x), build G̃ = S (Φ Diag(Λ) Diag(g(z)) Φ') S', with
+# S = Diag(√Λ) Φ'. For g(x) = r(x)^2, this reproduces the DVR diagonal exactly.
+function _multiplicative_dvr_from_fbr(N::Integer, l::Real, a::Real, g::Function)
+    α = 0.0
+    β = 2l
+    z, Λ, Φ, _ = _phi_vals_and_derivs(N, α, β)
+    W = Diagonal(Λ)
+    Dg = Diagonal(g.(z))
+    G_FBR = Φ * W * Dg * Φ'
+    S = Diagonal(sqrt.(Λ)) * Φ'
+    return S * G_FBR * S'
+end
+
+# Exact metric option: use FBR→DVR for g(x) = r(x)^2
+_metric_exact_dvr(N::Integer, l::Real, a::Real) =
+    _multiplicative_dvr_from_fbr(N, l, a, x -> (_x_to_r(x, a))^2)
+
 # Assemble SPS matrices
-function sps_matrices(N::Integer, l::Real, a::Real, V::Function)
+function sps_matrices(N::Integer, l::Real, a::Real, V::Function; exact_metric::Bool = false)
     N < 1 && throw(ArgumentError("N must be ≥ 1"))
     a <= 0 && throw(ArgumentError("a must be > 0"))
 
@@ -111,10 +138,12 @@ function sps_matrices(N::Integer, l::Real, a::Real, V::Function)
     # Boundary matrix at x = 1
     L = _boundary_matrix(ψ)
 
-    # Metric-like matrix for r^2 factor (multiplicative in DVR)
-    # NOTE: This is the DVR diagonal of r^2. Appendix C provides closed-form
-    # expressions for exact metric factors; this serves as an initial implementation.
-    ξ = _diagonal_dvr(r .^ 2)
+    # Metric-like matrix for r^2 factor
+    ξ = if exact_metric
+        _metric_exact_dvr(N, l, a)
+    else
+        _diagonal_dvr(r .^ 2)
+    end
 
     # Potential: centrifugal + external V(r), both multiplicative in DVR
     U_diag = _centrifugal_diag(l, r) .+ V.(r)
@@ -151,8 +180,15 @@ function sps_linearize_qep(H̃, ξ, L, a; b::Real = 0.0)
 end
 
 # Solve the QEP via linearization
-function sps_solve(N::Integer, l::Real, a::Real, V::Function; b::Real = 0.0)
-    K̃, ξ, L, H̃, z, Λ, ψ, r = sps_matrices(N, l, a, V)
+function sps_solve(
+    N::Integer,
+    l::Real,
+    a::Real,
+    V::Function;
+    b::Real = 0.0,
+    exact_metric::Bool = false,
+)
+    K̃, ξ, L, H̃, z, Λ, ψ, r = sps_matrices(N, l, a, V; exact_metric = exact_metric)
     A, B = sps_linearize_qep(H̃, ξ, L, a; b = b)
     F = eigen(A, B)
     k = F.values
