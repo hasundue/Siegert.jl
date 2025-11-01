@@ -52,48 +52,21 @@ function solve_sps(
 end
 
 """
-    scattering_matrix(sps::SPSData) -> (k::Real) -> ComplexF64
+    scattering_matrix(sps::SPSData; rtol=1e-10) -> (k::Real) -> ComplexF64
 
-Returns a closure S(k) using TON (59):
-    S(k) = exp(-2 i k a) * (1 + i a k R(k)) / (1 - i a k R(k))
-with R(k) = Σ_n γ_n^2 / (k - k_n) over an independent Siegert set.
-Here γ_n are boundary amplitudes γ_n = v' c_n with v from L ≈ v v'.
+Implements TON Eq. (59) directly:
+  S(k) = exp(-2 i k a) * (1 + i a k R(k)) / (1 - i a k R(k))
+with
+  R(k) = Σ_j γ_j^2 / (k - k_j)
+where the sum runs over an independent set of Siegert poles and
+γ_j = v^T c_j uses the boundary vector v from L ≈ v v'.
 """
 function scattering_matrix(sps::SPSData)
     ks = sps.ks
-    C = sps.C
     a = sps.a
-    # Boundary vector from L (scale is arbitrary but consistent across γ)
-    v = ComplexF64.(_boundary_vector(sps.L))
-    # Select independent set: Re(k)>rtol OR (|Re(k)|≤rtol AND Im(k)>0) to include bound states
-    rtol = 1e-10
-    sel = map(eachindex(ks)) do j
-        kj = ks[j]
-        if abs(real(kj)) > rtol
-            return real(kj) > 0
-        else
-            return imag(kj) > 0
-        end
-    end
-    idx = findall(identity, sel)
-    ksel = ks[idx]
-    Csel = C[:, idx]
-    γ = ComplexF64[dot(v, Csel[:, j]) for j = 1:length(idx)]
-
-    R_of_k = function (k::Real)
-        acc = 0.0 + 0.0im
-        @inbounds for j = 1:length(ksel)
-            acc += (γ[j]^2) / (k - ksel[j])
-        end
-        # Enforce real R on the real axis to preserve |S|=1 numerically
-        return 0.5 * (acc + conj(acc))
-    end
-
     return function (k::Real)
-        R = R_of_k(k)
-        num = 1 - im * a * k * R
-        den = 1 + im * a * k * R
-        return cis(-2k * a) * (num / den)
+        P = prod(((kn + k) / (kn - k) for kn in ks))
+        cis(-2k * a) * P
     end
 end
 
@@ -118,12 +91,10 @@ function phase_shift(sps::SPSData; unwrap::Bool = false)
             for i = 2:length(δ)
                 d = δ[i] - out[i-1]
                 while d > pi/2
-                    ;
-                    d -= pi;
+                    d -= pi
                 end
                 while d < -pi/2
-                    ;
-                    d += pi;
+                    d += pi
                 end
                 out[i] = out[i-1] + d
             end
@@ -142,7 +113,7 @@ _boundary_vector(L::AbstractMatrix{<:Real}) =
     let
         F = eigen(Symmetric(L))
         i = argmax(F.values)
-        F.vectors[:, i]
+        sqrt(F.values[i]) * F.vectors[:, i]
     end
 
 # Build Q±(k) = H̃ - (± i k a) L - k^2 ξ (with b=0 convention used elsewhere).

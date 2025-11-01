@@ -12,7 +12,7 @@ using LinearAlgebra: norm
 
     S = scattering_matrix(sps)
     for k in (0.2, 0.5, 1.0, 1.5, 2.0)
-        @test isapprox(abs(S(k)), 1.0; atol = 5e-8, rtol = 0)
+        @test isapprox(abs(S(k)), 1.0; atol = 1e-10, rtol = 0)
     end
 end
 
@@ -34,9 +34,9 @@ end
     cout = outgoing_on_grid(sps, k)
     res = Qp * cout
     using LinearAlgebra: opnorm, Symmetric, eigen
-    @test norm(res) / (opnorm(Qp) * max(norm(cout), 1e-12)) < 1e-3
+    @test norm(res) / (opnorm(Qp) * max(norm(cout), 1e-12)) < 1e-6
 
     # Boundary constraint v'c ≈ 1 (from augmented LSQ)
-    v = ComplexF64.(eigen(Symmetric(sps.L)).vectors[:, end])
-    @test abs(v' * cout - 1) < 1e-2
+    v = ComplexF64.(Siegert._boundary_vector(sps.L))
+    @test abs(v' * cout - 1) < 1e-6
 end
