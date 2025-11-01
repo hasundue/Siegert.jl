@@ -53,6 +53,22 @@ Jacobi weight function ω(x) = (1-x)^α (1+x)^β on [-1,1].
 jacobi_weight(x, α, β) = (1 - x)^α * (1 + x)^β
 
 """
+Compute boundary values ψ_n(1) for the L2-orthonormal Jacobi basis.
+Returns a vector of length N where entry n contains φ_{n-1}(1).
+"""
+function jacobi_basis_at_1(N::Integer, α::Real, β::Real)
+    N < 1 && throw(DomainError(N, "N must be ≥ 1"))
+    vals = zeros(N)
+    for n = 0:(N-1)
+        P_at_1 = Jacobi.jacobi(1.0, n, α, β)
+        h = jacobi_normsq(n, α, β)
+        w_at_1 = jacobi_weight(1.0, α, β)
+        vals[n+1] = sqrt(w_at_1 / h) * P_at_1
+    end
+    return vals
+end
+
+"""
 Construct the Jacobi-based Gaussian DVR basis {ψ_i}
 associated with the Gauss–Jacobi grid for (N, α, β).
 

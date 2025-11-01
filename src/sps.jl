@@ -95,23 +95,79 @@ function _phi_vals_and_derivs(N::Integer, α::Real, β::Real)
     return z, Λ, Φ, dΦ
 end
 
-# Build kinetic matrix K̃ in the DVR basis using
+# Build transformation matrix T from Eq. C10: T_ni = √(λ_i / w(x_i)) ψ_n(x_i)
+# where ψ_n is the L2-orthonormal basis and w(x_i) is the Jacobi weight at node i.
+function _transformation_matrix_T(N::Integer, α::Real, β::Real)
+    z, λ = jacobi_gauss(N, α, β)
+    ω = jacobi_weight.(z, Ref(α), Ref(β))
+    Λ = λ ./ ω
+    φ_vals = jacobi_basis_at_1(N, α, β)  # Will recompute properly below
+
+    # Get φ values at all nodes
+    φ = jacobi_basis_L2(N, α, β)
+    Φ = zeros(N, N)
+    for n = 1:N
+        for i = 1:N
+            Φ[n, i] = φ[n](z[i])
+        end
+    end
+
+    # T[n, i] = sqrt(Λ[i]) * φ_n(z[i])
+    T = zeros(N, N)
+    for n = 1:N
+        for i = 1:N
+            T[n, i] = sqrt(Λ[i]) * Φ[n, i]
+        end
+    end
+
+    return T
+end
+
+# Build kinetic matrix K̃^(ψ) in FBR via Eq. C21a and C21b from TON 1998 Appendix C
+# K̃^(ψ)_nm = (1/a) * [ δ_nm Σ_k ψ_k(1)² - ψ_n(1) ψ_m(1) ]
+# Reference: Tolstikhin et al., Phys. Rev. A 58, 2077 (1998), Eqs. C21a, C21b
+function _kinetic_fbr_ton(N::Integer, α::Real, β::Real, a::Real)
+    # Get boundary values ψ_n(1)
+    ψ_at_1 = jacobi_basis_at_1(N, α, β)
+
+    # Compute Σ_k ψ_k(1)²
+    sum_psi_sq = sum(ψ_at_1 .^ 2)
+
+    # Build K̃^(ψ) matrix
+    K_psi = zeros(N, N)
+    for n = 1:N
+        for m = 1:N
+            if n == m
+                K_psi[n, m] = (1 / a) * (sum_psi_sq - ψ_at_1[n] * ψ_at_1[m])
+            else
+                K_psi[n, m] = -(1 / a) * ψ_at_1[n] * ψ_at_1[m]
+            end
+        end
+    end
+
+    return K_psi
+end
+
+# Build kinetic matrix K̃ in the DVR basis using TON 1998 Appendix C method
+# K̃_ij = Σ_{n,m} T_ni K̃^(ψ)_nm T_mj  (Eq. C20)
 #
-# Derivation of the 1/a factor (from (C15)):
-# In a.u., T = −(1/2) d²/dr², and the bilinear form after one integration by parts is
-# (1/2) ∫_0^a (du/dr)(dv/dr) dr (boundary term is handled via L).
-# With r = a(1+x)/2, dr = (a/2) dx and d/dr = (2/a) d/dx, so
-# (1/2)∫ (du/dr)(dv/dr) dr = (1/a) ∫ (du/dx)(dv/dx) dx.
-# Discretize in the φ-basis using Gauss–Jacobi quadrature: K_FBR = (1/a) dΦ Diag(Λ) dΦ',
-# and map to DVR with S = Diag(√Λ) Φ': K̃ = S K_FBR S'.
+# Reference: Tolstikhin et al., Phys. Rev. A 58, 2077 (1998), Appendix C
+# - Eq. C10: Transformation matrix T_ni = √(λ_i / w(x_i)) ψ_n(x_i)
+# - Eq. C20: K̃ = T^T K̃^(ψ) T
+# - Eq. C21: K̃^(ψ)_nm = (1/a) [δ_nm Σ_k ψ_k(1)² - ψ_n(1) ψ_m(1)]
 function _kinetic_dvr(N::Integer, l::Real, a::Real)
     α = 0.0
     β = 2l
-    z, Λ, Φ, dΦ = _phi_vals_and_derivs(N, α, β)
 
-    K_FBR = (1 / a) * (dΦ * Diagonal(Λ) * dΦ')
-    S = Diagonal(sqrt.(Λ)) * Φ'
-    K̃ = S * K_FBR * S'
+    # Build transformation matrix T (Eq. C10)
+    T = _transformation_matrix_T(N, α, β)
+
+    # Build K̃^(ψ) in FBR (Eq. C21)
+    K_psi = _kinetic_fbr_ton(N, α, β, a)
+
+    # Transform to DVR (Eq. C20)
+    K̃ = T' * K_psi * T
+
     return K̃
 end
 
@@ -198,8 +254,7 @@ function sps_solve(
     F = eigen(A, B)
     k = F.values
     Y = F.vectors
-    # Extract c coefficients from lower block of eigenvectors
-    C = @view Y[(N+1):end, :]
+    C = Array(@view Y[1:N, :])
     return k, C, (; A, B, H̃, ξ, L, z, Λ, ψ, r)
 end
 
