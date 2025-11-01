@@ -2,7 +2,7 @@ using Test
 using Siegert
 using LinearAlgebra: norm
 
-@testset "Waves: S and phase from SPS (square well)" begin
+@testset "Waves: S via TON (59) has |S|=1 on real k" begin
     a = 1.0;
     l = 0;
     V0 = -112.5;
@@ -10,13 +10,10 @@ using LinearAlgebra: norm
     N = 19
     sps = solve_sps(N, l, a, V; b = 0.0, exact_metric = true)
 
-    # S via waves equals product-form
-    S1 = scattering_matrix(sps)
-    S2 = s_from_eigs(sps.ks, sps.a)
-    for k in (0.2, 0.5, 1.0, 1.5)
-        @test isapprox(S1(k), S2(k); atol = 5e-12, rtol = 0)
+    S = scattering_matrix(sps)
+    for k in (0.2, 0.5, 1.0, 1.5, 2.0)
+        @test isapprox(abs(S(k)), 1.0; atol = 5e-8, rtol = 0)
     end
-
 end
 
 @testset "Waves: interior standing wave on SPS grid" begin

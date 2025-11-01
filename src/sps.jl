@@ -3,6 +3,11 @@
 # This file provides the grid and multiplicative-operator matrices needed
 # for the Tolstikhin–Ostrovsky–Nakamura single-channel SPS method.
 #
+# Reference
+# - O. I. Tolstikhin, V. N. Ostrovsky, and H. Nakamura,
+#   “Siegert pseudostate formulation of scattering theory: One-channel case,”
+#   Phys. Rev. A 58, 2077–2095 (1998). doi:10.1103/PhysRevA.58.2077
+#
 # Notes
 # - Uses the Jacobi Gaussian DVR on x ∈ (-1, 1) with (α, β) = (0, 2l).
 # - Maps to the physical radial interval r ∈ (0, a) via r(x) = a (1 + x) / 2.

@@ -1,5 +1,10 @@
 module Siegert
 
+# References
+# - O. I. Tolstikhin, V. N. Ostrovsky, and H. Nakamura,
+#   “Siegert pseudostate formulation of scattering theory: One-channel case,”
+#   Phys. Rev. A 58, 2077–2095 (1998). doi:10.1103/PhysRevA.58.2077
+
 using Jacobi
 using LinearAlgebra: Diagonal, eigen, I
 using SpecialFunctions: gamma
@@ -14,8 +19,6 @@ export jacobi_normsq,
     sps_linearize_qep,
     sps_solve,
     square_well_V,
-    s_square_well_l0,
-    s_from_eigs,
     SPSData,
     solve_sps,
     scattering_matrix,
@@ -25,7 +28,6 @@ export jacobi_normsq,
 
 include("jacobi.jl")
 include("sps.jl")
-include("phase.jl")
 include("waves.jl")
 
 end

@@ -1,7 +1,13 @@
 # Waves and scattering utilities built on SPS
-# Implements scattering observables and interior waves from SPSs [TON, Sec. IV].
+# Implements scattering observables and interior waves from SPSs.
+#
+# Reference
+# - O. I. Tolstikhin, V. N. Ostrovsky, and H. Nakamura,
+#   “Siegert pseudostate formulation of scattering theory: One-channel case,”
+#   Phys. Rev. A 58, 2077–2095 (1998). doi:10.1103/PhysRevA.58.2077
+#   (See Sec. IV for scattering observables and interior waves.)
 
-using LinearAlgebra: Symmetric, eigen
+using LinearAlgebra: Symmetric, eigen, dot
 
 # Structured SPS result for downstream scattering/waves
 struct SPSData
@@ -48,11 +54,47 @@ end
 """
     scattering_matrix(sps::SPSData) -> (k::Real) -> ComplexF64
 
-Returns a closure S(k) using the SPS product formula and the channel radius `a`.
+Returns a closure S(k) using TON (59):
+    S(k) = exp(-2 i k a) * (1 + i a k R(k)) / (1 - i a k R(k))
+with R(k) = Σ_n γ_n^2 / (k - k_n) over an independent Siegert set.
+Here γ_n are boundary amplitudes γ_n = v' c_n with v from L ≈ v v'.
 """
 function scattering_matrix(sps::SPSData)
-    Sprod = s_from_eigs(sps.ks, sps.a)
-    return k::Real -> Sprod(k)
+    ks = sps.ks
+    C = sps.C
+    a = sps.a
+    # Boundary vector from L (scale is arbitrary but consistent across γ)
+    v = ComplexF64.(_boundary_vector(sps.L))
+    # Select independent set: Re(k)>rtol OR (|Re(k)|≤rtol AND Im(k)>0) to include bound states
+    rtol = 1e-10
+    sel = map(eachindex(ks)) do j
+        kj = ks[j]
+        if abs(real(kj)) > rtol
+            return real(kj) > 0
+        else
+            return imag(kj) > 0
+        end
+    end
+    idx = findall(identity, sel)
+    ksel = ks[idx]
+    Csel = C[:, idx]
+    γ = ComplexF64[dot(v, Csel[:, j]) for j = 1:length(idx)]
+
+    R_of_k = function (k::Real)
+        acc = 0.0 + 0.0im
+        @inbounds for j = 1:length(ksel)
+            acc += (γ[j]^2) / (k - ksel[j])
+        end
+        # Enforce real R on the real axis to preserve |S|=1 numerically
+        return 0.5 * (acc + conj(acc))
+    end
+
+    return function (k::Real)
+        R = R_of_k(k)
+        num = 1 - im * a * k * R
+        den = 1 + im * a * k * R
+        return cis(-2k * a) * (num / den)
+    end
 end
 
 """

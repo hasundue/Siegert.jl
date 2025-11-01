@@ -27,7 +27,7 @@
 - Prefer targeted runs while iterating. Example: `julia --project test/waves_tests.jl` instead of the full suite. Only run `Pkg.test()` before pushing.
 
 ## Code Style
-- 2-space indent; ≲100 cols; trailing commas on multiline; one export per line; triple-quoted docstrings.
+- 4-space indent; ≲100 cols; trailing commas on multiline; one export per line; triple-quoted docstrings.
 
 ## Imports
 - Group stdlib, external, local; one per line; prefer `using`; qualify on conflicts; alphabetize groups.
@@ -41,6 +41,8 @@
 
 ## Docs
 - Every public API: signature, brief, example, edge cases/units.
+- Physics implementations: always reference the original paper in code headers/docstrings with full citation (authors, title, venue, year, DOI); cite equation numbers used and call out any scaling/convention choices.
+- When porting formulas, state assumptions and units; link follow-up references when extending (e.g., multi-channel, l>0).
 
 ## Nix & Formatting
 - Keep `flake.nix` formatted; `treefmt` uses `nixfmt`; don’t bypass hooks.
