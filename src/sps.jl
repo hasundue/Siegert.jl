@@ -5,24 +5,24 @@
 #
 # Reference
 # - O. I. Tolstikhin, V. N. Ostrovsky, and H. Nakamura,
-#   “Siegert pseudostate formulation of scattering theory: One-channel case,”
+#   "Siegert pseudostate formulation of scattering theory: One-channel case,"
 #   Phys. Rev. A 58, 2077–2095 (1998). doi:10.1103/PhysRevA.58.2077
 #
 # Notes
 # - Uses the Jacobi Gaussian DVR on x ∈ (-1, 1) with (α, β) = (0, 2l).
 # - Maps to the physical radial interval r ∈ (0, a) via r(x) = a (1 + x) / 2.
-# - Both kinetic K̃ and metric ξ matrices are implemented via FBR→DVR transform
+# - Both kinetic K̃ and metric ρ matrices are implemented via FBR→DVR transform
 #   using the TON 1998 Appendix C formalism (Eqs. C10, C20, C21).
 # - Multiplicative potential operators V(r) are diagonal in DVR.
 #
 # Symbol mapping (paper → code):
-# - ρ (metric multiplying k²) → ξ (to avoid overloading ρ)
-# - Q(k) = H̃ − (b + i k a) L − k² ξ with H̃ = K̃ + U
-# - M = −ξ, C = −im a L, K = H̃ − b L (for linearization)
+# - ρ (metric multiplying k²) in paper is ρ in code
+# - Q(k) = H̃ − (b + i k a) L − k² ρ with H̃ = K̃ + U
+# - Following TON 1998 Eq. (20) with matrices from Eq. (C24)
 #
 # Public API (initial):
-# - sps_matrices(N, l, a, V) -> (K̃, ξ, L, H̃, z, Λ, ψ, r) where V is V(r)::Real
-# - sps_linearize_qep(H̃, ξ, L, a; b=0.0) -> (A, B) such that A y = k B y
+# - sps_matrices(N, l, a, V) -> (K̃, ρ, L, H̃, z, Λ, ψ, r) where V is V(r)::Real
+# - sps_linearize_qep(H̃, ρ, L, a; b=0.0) -> Ã such that Ã y = λ y
 # - sps_solve(N, l, a, V; b=0.0) -> (k, C, meta)
 
 const _ONE = 1.0
@@ -121,9 +121,9 @@ function _transformation_matrix_T(N::Integer, α::Real, β::Real)
     return T
 end
 
-# Build kinetic matrix K̃^(ψ) in FBR via Eq. C21a and C21b from TON 1998 Appendix C
-# K̃^(ψ)_nm = (1/a) * [ δ_nm Σ_k ψ_k(1)² - ψ_n(1) ψ_m(1) ]
-# Reference: Tolstikhin et al., Phys. Rev. A 58, 2077 (1998), Eqs. C21a, C21b
+# Build kinetic matrix K̃^(ψ) in FBR via Eq. C21 from TON 1998 Appendix C
+# K̃^(ψ)_nm = (1/2) * [ δ_nm Σ_k ψ_k(1)² - ψ_n(1) ψ_m(1) ]
+# Reference: Tolstikhin et al., Phys. Rev. A 58, 2077 (1998), Eq. C21
 function _kinetic_fbr_ton(N::Integer, α::Real, β::Real, a::Real)
     # Get boundary values ψ_n(1)
     ψ_at_1 = jacobi_basis_at_1(N, α, β)
@@ -136,9 +136,9 @@ function _kinetic_fbr_ton(N::Integer, α::Real, β::Real, a::Real)
     for n = 1:N
         for m = 1:N
             if n == m
-                K_psi[n, m] = (1 / a) * (sum_psi_sq - ψ_at_1[n] * ψ_at_1[m])
+                K_psi[n, m] = (1/2) * (sum_psi_sq - ψ_at_1[n] * ψ_at_1[m])
             else
-                K_psi[n, m] = -(1 / a) * ψ_at_1[n] * ψ_at_1[m]
+                K_psi[n, m] = -(1/2) * ψ_at_1[n] * ψ_at_1[m]
             end
         end
     end
@@ -169,13 +169,13 @@ function _kinetic_dvr(N::Integer, l::Real, a::Real)
     return K̃
 end
 
-# Build metric matrix ξ̃ (ρ in TON paper) in the DVR basis using TON 1998 Appendix C method
-# ξ̃_ij = Σ_{n,m} T_ni ξ̃^(ψ)_nm T_mj  (Eq. C20 structure)
+# Build metric matrix ρ in the DVR basis using TON 1998 Appendix C method
+# ρ_ij = Σ_{n,m} T_ni ρ^(ψ)_nm T_mj  (Eq. C20 structure)
 #
 # Reference: Tolstikhin et al., Phys. Rev. A 58, 2077 (1998), Appendix C
-# - The metric ξ̃^(ψ) in FBR is computed analogously to K̃^(ψ)
-# - For the coordinate r², we have ξ̃^(ψ)_nm = ∫ ψ_n(x) r(x)² ψ_m(x) dx
-# - Using r(x) = a(1+x)/2, this gives ξ̃^(ψ)_nm = a² ∫ ψ_n(x) (1+x)²/4 ψ_m(x) dx
+# - The metric ρ^(ψ) in FBR is computed analogously to K̃^(ψ)
+# - For the coordinate r², we have ρ^(ψ)_nm = ∫ ψ_n(x) r(x)² ψ_m(x) dx
+# - Using r(x) = a(1+x)/2, this gives ρ^(ψ)_nm = a² ∫ ψ_n(x) (1+x)²/4 ψ_m(x) dx
 function _metric_dvr(N::Integer, l::Real, a::Real)
     α = 0.0
     β = 2l
@@ -187,7 +187,7 @@ function _metric_dvr(N::Integer, l::Real, a::Real)
     z, λ = jacobi_gauss(N, α, β)
     φ = jacobi_basis_L2(N, α, β)
 
-    # Build ξ̃^(ψ) in FBR: ξ̃^(ψ)_nm = a²/4 ∫ ψ_n(x) (1+x)² ψ_m(x) dx
+    # Build ρ^(ψ) in FBR: ρ^(ψ)_nm = a²/4 ∫ ψ_n(x) (1+x)² ψ_m(x) dx
     # Using Gauss quadrature with measure Λ = λ/w (unweighted L2 measure)
     ω = jacobi_weight.(z, Ref(α), Ref(β))
     Λ = λ ./ ω
@@ -196,17 +196,17 @@ function _metric_dvr(N::Integer, l::Real, a::Real)
     r_sq_vals = [(a * (1 + xi) / 2)^2 for xi in z]
 
     # Matrix element: ∫ φ_n(x) r(x)² φ_m(x) dx using quadrature
-    ξ_psi = zeros(N, N)
+    ρ_psi = zeros(N, N)
     for n = 1:N
         for m = 1:N
-            ξ_psi[n, m] = sum(φ[n](z[i]) * r_sq_vals[i] * φ[m](z[i]) * Λ[i] for i = 1:N)
+            ρ_psi[n, m] = sum(φ[n](z[i]) * r_sq_vals[i] * φ[m](z[i]) * Λ[i] for i = 1:N)
         end
     end
 
     # Transform to DVR (analogous to Eq. C20)
-    ξ̃ = T' * ξ_psi * T
+    ρ = T' * ρ_psi * T
 
-    return ξ̃
+    return ρ
 end
 
 # Assemble SPS matrices
@@ -220,7 +220,7 @@ function sps_matrices(N::Integer, l::Real, a::Real, V::Function)
     L = _boundary_matrix(ψ)
 
     # Metric via FBR→DVR
-    ξ = _metric_dvr(N, l, a)
+    ρ = _metric_dvr(N, l, a)
 
     # Potential: centrifugal + external V(r), both multiplicative in DVR
     U_diag = _centrifugal_diag(l, r) .+ V.(r)
@@ -232,39 +232,56 @@ function sps_matrices(N::Integer, l::Real, a::Real, V::Function)
     # Provisional Hamiltonian in DVR
     H̃ = K̃ + U
 
-    return K̃, ξ, L, H̃, z, Λ, ψ, r
+    return K̃, ρ, L, H̃, z, Λ, ψ, r
 end
 
-# Linearize QEP: Q(k) c = 0 with Q(k) = k^2 M + k C + K
-# Identify M, C, K from (H̃ − (b + i k a) L − k^2 ξ):
-#   M = −ξ, C = −im * a * L, K = H̃ − b L
-function sps_linearize_qep(H̃, ξ, L, a; b::Real = 0.0)
+# Linearize QEP following TON 1998 Eq. (20) with matrices from Eq. (C24)
+#
+# Reference: Tolstikhin et al., Phys. Rev. A 58, 2077 (1998)
+# - Eq. (9): QEP (H̃ − (b + ika)L − k²ρ)c = 0
+# - Eq. (16): Standard QEP form (A + λB + λ²I)c = 0 with λ = ik
+# - Eq. (20): Companion linearization [0 I; -K -C][c; λc] = λ[c; λc]
+# - Eq. (C24): Matrices A = 2ρ⁻¹(H̃ − bL), B = −2aρ⁻¹L
+# - Standard companion form: K = −A, C = −B
+# - Solve eigenvalue problem: Ã y = λ y with y = [c; λc]
+#
+# Returns Ã for the linearized system where eigenvalue λ = ik
+function sps_linearize_qep(H̃, ρ, L, a; b::Real = 0.0)
     N = size(H̃, 1)
     size(H̃, 2) == N || throw(ArgumentError("H̃ must be square"))
-    size(ξ) == (N, N) || throw(ArgumentError("ξ must be N×N"))
+    size(ρ) == (N, N) || throw(ArgumentError("ρ must be N×N"))
     size(L) == (N, N) || throw(ArgumentError("L must be N×N"))
 
-    M = -ComplexF64.(ξ)
-    C = -im * a * ComplexF64.(L)
-    K = ComplexF64.(H̃ .- b .* L)
+    # Eq. (C24): Matrices A and B (non-symmetric version)
+    ρ_inv = inv(ρ)
+    A = 2 * ρ_inv * (H̃ - b * L)
+    B = -2 * a * ρ_inv * L
 
+    # Eq. (20): Standard companion linearization
+    # For (A + λB + λ²I)c = 0, the companion form is:
+    # [0  I][c ]     [c ]
+    # [-K -C][λc] = λ[λc]  where K = -A, C = -B
     Z = zeros(ComplexF64, N, N)
     Ieye = Matrix{ComplexF64}(I, N, N)
 
-    A = [Z Ieye; -K -C]
-    B = [Ieye Z; Z M]
-    return A, B
+    K = -ComplexF64.(A)
+    C = -ComplexF64.(B)
+
+    # Ã y = λ y
+    Ã = [Z Ieye; -K -C]
+    return Ã
 end
 
 # Solve the QEP via linearization
 function sps_solve(N::Integer, l::Real, a::Real, V::Function; b::Real = 0.0)
-    K̃, ξ, L, H̃, z, Λ, ψ, r = sps_matrices(N, l, a, V)
-    A, B = sps_linearize_qep(H̃, ξ, L, a; b = b)
-    F = eigen(A, B)
-    k = F.values
+    K̃, ρ, L, H̃, z, Λ, ψ, r = sps_matrices(N, l, a, V)
+    Ã = sps_linearize_qep(H̃, ρ, L, a; b = b)
+    F = eigen(Ã)
+    # Swap imag and real to get k from λ = ik
+    k = -im .* F.values
     Y = F.vectors
     C = Array(@view Y[1:N, :])
-    return k, C, (; A, B, H̃, ξ, L, z, Λ, ψ, r)
+    return k, C, (; Ã, H̃, ρ, L, z, Λ, ψ, r)
 end
 
 # Convenience: square well V(r) = 0 inside [0,a]

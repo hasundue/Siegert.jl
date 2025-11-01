@@ -30,7 +30,7 @@ scattering and wave reconstruction [TON, Sec. IV].
 function solve_sps(N::Integer, l::Integer, a::Real, V::Function; b::Real = 0.0)
     ks, C, meta = sps_solve(N, l, a, V; b = b)
     H̃ = Matrix{Float64}(meta.H̃)
-    ξ = Matrix{Float64}(meta.ξ)
+    ρ = Matrix{Float64}(meta.ρ)
     L = Matrix{Float64}(meta.L)
     return SPSData(
         ComplexF64.(ks),
@@ -39,7 +39,7 @@ function solve_sps(N::Integer, l::Integer, a::Real, V::Function; b::Real = 0.0)
         float(a),
         Int(l),
         H̃,
-        ξ,
+        ρ,
         L,
     )
 end
