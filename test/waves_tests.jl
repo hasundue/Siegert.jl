@@ -8,7 +8,7 @@ using LinearAlgebra: norm
     V0 = -112.5;
     V = _ -> V0
     N = 19
-    sps = solve_sps(N, l, a, V; b = 0.0, exact_metric = true)
+    sps = solve_sps(N, l, a, V; b = 0.0)
 
     S = scattering_matrix(sps)
     for k in (0.2, 0.5, 1.0, 1.5, 2.0)
@@ -22,7 +22,7 @@ end
     V0 = -112.5;
     V = _ -> V0
     N = 19
-    sps = solve_sps(N, l, a, V; b = 0.0, exact_metric = true)
+    sps = solve_sps(N, l, a, V; b = 0.0)
 
     k = 1.0
     u = standing_wave_on_grid(sps, k)

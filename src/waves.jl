@@ -22,20 +22,13 @@ struct SPSData
 end
 
 """
-    solve_sps(N, l, a, V; b=0.0, exact_metric=false) -> SPSData
+    solve_sps(N, l, a, V; b=0.0) -> SPSData
 
 Runs the SPS pipeline and returns a structured result for downstream
 scattering and wave reconstruction [TON, Sec. IV].
 """
-function solve_sps(
-    N::Integer,
-    l::Integer,
-    a::Real,
-    V::Function;
-    b::Real = 0.0,
-    exact_metric::Bool = false,
-)
-    ks, C, meta = sps_solve(N, l, a, V; b = b, exact_metric = exact_metric)
+function solve_sps(N::Integer, l::Integer, a::Real, V::Function; b::Real = 0.0)
+    ks, C, meta = sps_solve(N, l, a, V; b = b)
     H̃ = Matrix{Float64}(meta.H̃)
     ξ = Matrix{Float64}(meta.ξ)
     L = Matrix{Float64}(meta.L)

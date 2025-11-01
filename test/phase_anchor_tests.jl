@@ -8,7 +8,7 @@ using Siegert
     V = _ -> V0
     N = 19
 
-    sps = solve_sps(N, l, a, V; b = 0.0, exact_metric = true)
+    sps = solve_sps(N, l, a, V; b = 0.0)
     S = scattering_matrix(sps)
 
     # TON anchor: high-k phase value reported in the paper

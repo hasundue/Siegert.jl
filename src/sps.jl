@@ -11,10 +11,9 @@
 # Notes
 # - Uses the Jacobi Gaussian DVR on x ∈ (-1, 1) with (α, β) = (0, 2l).
 # - Maps to the physical radial interval r ∈ (0, a) via r(x) = a (1 + x) / 2.
-# - Multiplicative operators (e.g., r², V(r)) are represented diagonally in DVR.
-# - The kinetic matrix K̃ is implemented via an FBR→DVR transform using
-#   derivatives of the L2-orthonormal Jacobi basis φ_n and Gauss–Jacobi
-#   quadrature on the x-domain, with the mapping r(x).
+# - Both kinetic K̃ and metric ξ matrices are implemented via FBR→DVR transform
+#   using the TON 1998 Appendix C formalism (Eqs. C10, C20, C21).
+# - Multiplicative potential operators V(r) are diagonal in DVR.
 #
 # Symbol mapping (paper → code):
 # - ρ (metric multiplying k²) → ξ (to avoid overloading ρ)
@@ -22,10 +21,9 @@
 # - M = −ξ, C = −im a L, K = H̃ − b L (for linearization)
 #
 # Public API (initial):
-# - sps_matrices(N, l, a, V; exact_metric=false) -> (K̃, ξ, L, H̃, z, Λ, ψ, r)
-#   where V is a callable V(r)::Real.
+# - sps_matrices(N, l, a, V) -> (K̃, ξ, L, H̃, z, Λ, ψ, r) where V is V(r)::Real
 # - sps_linearize_qep(H̃, ξ, L, a; b=0.0) -> (A, B) such that A y = k B y
-# - sps_solve(N, l, a, V; b=0.0, exact_metric=false) -> (k, C, meta)
+# - sps_solve(N, l, a, V; b=0.0) -> (k, C, meta)
 
 const _ONE = 1.0
 
@@ -171,26 +169,48 @@ function _kinetic_dvr(N::Integer, l::Real, a::Real)
     return K̃
 end
 
-# Generic multiplicative operator via FBR→DVR using Gauss–Jacobi quadrature.
-# Given g(x), build G̃ = S (Φ Diag(Λ) Diag(g(z)) Φ') S', with
-# S = Diag(√Λ) Φ'. For g(x) = r(x)^2, this reproduces the DVR diagonal exactly.
-function _multiplicative_dvr_from_fbr(N::Integer, l::Real, a::Real, g::Function)
+# Build metric matrix ξ̃ (ρ in TON paper) in the DVR basis using TON 1998 Appendix C method
+# ξ̃_ij = Σ_{n,m} T_ni ξ̃^(ψ)_nm T_mj  (Eq. C20 structure)
+#
+# Reference: Tolstikhin et al., Phys. Rev. A 58, 2077 (1998), Appendix C
+# - The metric ξ̃^(ψ) in FBR is computed analogously to K̃^(ψ)
+# - For the coordinate r², we have ξ̃^(ψ)_nm = ∫ ψ_n(x) r(x)² ψ_m(x) dx
+# - Using r(x) = a(1+x)/2, this gives ξ̃^(ψ)_nm = a² ∫ ψ_n(x) (1+x)²/4 ψ_m(x) dx
+function _metric_dvr(N::Integer, l::Real, a::Real)
     α = 0.0
     β = 2l
-    z, Λ, Φ, _ = _phi_vals_and_derivs(N, α, β)
-    W = Diagonal(Λ)
-    Dg = Diagonal(g.(z))
-    G_FBR = Φ * W * Dg * Φ'
-    S = Diagonal(sqrt.(Λ)) * Φ'
-    return S * G_FBR * S'
+
+    # Build transformation matrix T (Eq. C10)
+    T = _transformation_matrix_T(N, α, β)
+
+    # Get φ values at all nodes for computing FBR matrix elements
+    z, λ = jacobi_gauss(N, α, β)
+    φ = jacobi_basis_L2(N, α, β)
+
+    # Build ξ̃^(ψ) in FBR: ξ̃^(ψ)_nm = a²/4 ∫ ψ_n(x) (1+x)² ψ_m(x) dx
+    # Using Gauss quadrature with measure Λ = λ/w (unweighted L2 measure)
+    ω = jacobi_weight.(z, Ref(α), Ref(β))
+    Λ = λ ./ ω
+
+    # (1+x)² evaluated at quadrature points
+    r_sq_vals = [(a * (1 + xi) / 2)^2 for xi in z]
+
+    # Matrix element: ∫ φ_n(x) r(x)² φ_m(x) dx using quadrature
+    ξ_psi = zeros(N, N)
+    for n = 1:N
+        for m = 1:N
+            ξ_psi[n, m] = sum(φ[n](z[i]) * r_sq_vals[i] * φ[m](z[i]) * Λ[i] for i = 1:N)
+        end
+    end
+
+    # Transform to DVR (analogous to Eq. C20)
+    ξ̃ = T' * ξ_psi * T
+
+    return ξ̃
 end
 
-# Exact metric option: use FBR→DVR for g(x) = r(x)^2
-_metric_exact_dvr(N::Integer, l::Real, a::Real) =
-    _multiplicative_dvr_from_fbr(N, l, a, x -> (_x_to_r(x, a))^2)
-
 # Assemble SPS matrices
-function sps_matrices(N::Integer, l::Real, a::Real, V::Function; exact_metric::Bool = false)
+function sps_matrices(N::Integer, l::Real, a::Real, V::Function)
     N < 1 && throw(ArgumentError("N must be ≥ 1"))
     a <= 0 && throw(ArgumentError("a must be > 0"))
 
@@ -199,12 +219,8 @@ function sps_matrices(N::Integer, l::Real, a::Real, V::Function; exact_metric::B
     # Boundary matrix at x = 1
     L = _boundary_matrix(ψ)
 
-    # Metric-like matrix for r^2 factor
-    ξ = if exact_metric
-        _metric_exact_dvr(N, l, a)
-    else
-        _diagonal_dvr(r .^ 2)
-    end
+    # Metric via FBR→DVR
+    ξ = _metric_dvr(N, l, a)
 
     # Potential: centrifugal + external V(r), both multiplicative in DVR
     U_diag = _centrifugal_diag(l, r) .+ V.(r)
@@ -241,15 +257,8 @@ function sps_linearize_qep(H̃, ξ, L, a; b::Real = 0.0)
 end
 
 # Solve the QEP via linearization
-function sps_solve(
-    N::Integer,
-    l::Real,
-    a::Real,
-    V::Function;
-    b::Real = 0.0,
-    exact_metric::Bool = false,
-)
-    K̃, ξ, L, H̃, z, Λ, ψ, r = sps_matrices(N, l, a, V; exact_metric = exact_metric)
+function sps_solve(N::Integer, l::Real, a::Real, V::Function; b::Real = 0.0)
+    K̃, ξ, L, H̃, z, Λ, ψ, r = sps_matrices(N, l, a, V)
     A, B = sps_linearize_qep(H̃, ξ, L, a; b = b)
     F = eigen(A, B)
     k = F.values

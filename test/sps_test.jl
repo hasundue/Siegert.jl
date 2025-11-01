@@ -12,7 +12,7 @@ using Logging: @debug, @warn
     V = _ -> V0
     # Paper baseline: 2N = 38 → N = 19
     N = 19
-    ks, C, meta = sps_solve(N, l, a, V; b = 0.0, exact_metric = true)
+    ks, C, meta = sps_solve(N, l, a, V; b = 0.0)
 
     # Filter those close to the imaginary axis and (optionally) log for Im>0 and Im<0
     axis_eps = 1e-8
