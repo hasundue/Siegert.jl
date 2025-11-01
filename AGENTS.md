@@ -18,6 +18,14 @@
 - Single file: `julia --project test/<file>.jl`.
 - Name filter: `using Test; Test.@testset filter = t -> occursin("NAME", string(t)); include("test/runtests.jl")`.
 
+### Pkg dependencies (normal + extras)
+- Normal deps: `Pkg.add("PkgName")` / `Pkg.rm("PkgName")`.
+- Test-only deps (extras): `Pkg.add("PkgName"; extra=true)` / `Pkg.rm("PkgName"; extra=true)`.
+- Targets: for extras, reference in `[targets]` as `test = ["PkgName", ...]` (you may omit `"Test"`).
+- Dev/local deps: `Pkg.develop(PackageSpec(path="..."))`.
+- Don’t hand-write UUIDs/hashes; let Pkg populate Project/Manifest. Maintain `[compat]` manually as needed.
+- Optional: `Pkg.resolve()` after changes. Alternative: `test/Project.toml` for test deps; `Pkg.test()` auto-activates it.
+
 ## Code Style
 - 2-space indent; ≲100 cols; trailing commas on multiline; one export per line; triple-quoted docstrings.
 
