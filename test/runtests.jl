@@ -1,6 +1,7 @@
 using Test
 using Siegert
 using QuadGK
+using LinearAlgebra: Diagonal, diag, isdiag, norm, eigen
 
 atol = 1e-4
 
@@ -41,4 +42,51 @@ end
             end
         end
     end
+end
+
+@testset "SPS matrices (grid, L, ξ, H̃)" begin
+    for (N, l, a) in ((4, 0, 2.0), (5, 1, 3.0))
+        K̃, ξ, L, H̃, z, Λ, ψ, r = sps_matrices(N, l, a, square_well_V)
+        # Basic shapes and monotonic grid
+        @test size(K̃) == (N, N)
+        @test size(ξ) == (N, N) && isdiag(ξ)
+        @test size(L) == (N, N)
+        @test size(H̃) == (N, N)
+        @test length(z) == N && length(Λ) == N && length(ψ) == N && length(r) == N
+        @test all(-1 .< z .< 1)
+        @test all(Λ .> 0)
+        @test all(0 .< r .< a)
+        @test issorted(r)
+
+        # Boundary matrix equals ψ(1) ψ(1)'
+        v = [ψ[i](1.0) for i = 1:N]
+        @test isapprox(L, v * v'; atol = 1e-10, rtol = 0)
+
+        # ξ is r^2 on the diagonal (within FP tolerance)
+        @test isapprox(diag(ξ), r .^ 2; atol = 1e-12, rtol = 0)
+
+        # With placeholder K̃ = 0, H̃ is purely diagonal with centrifugal term
+        diagH = diag(H̃)
+        @test all(isapprox.(H̃, Diagonal(diagH); atol = 1e-12, rtol = 0))
+        centrifugal = l * (l + 1) ./ (2 .* r .^ 2)
+        @test isapprox(diagH, centrifugal; atol = 1e-12, rtol = 0)
+    end
+end
+
+@testset "QEP linearization (residual check)" begin
+    N, l, a = 4, 0, 2.0
+    K̃, ξ, L, H̃, z, Λ, ψ, r = sps_matrices(N, l, a, square_well_V)
+    A, B = sps_linearize_qep(H̃, ξ, L, a; b = 0.0)
+    F = eigen(A, B)
+    k = F.values
+    Y = F.vectors
+    # Build residuals Q(k) c with Q(k) = H̃ - (0 + im*k*a)L - k^2 ξ
+    res = zeros(length(k))
+    for j = 1:length(k)
+        kj = k[j]
+        c = Y[(N+1):end, j]
+        rj = (H̃ - (0.0 + im*kj*a) .* L - (kj^2) .* ξ) * c
+        res[j] = norm(rj)
+    end
+    @test all(res .< 1e-8)
 end
