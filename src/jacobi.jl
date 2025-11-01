@@ -61,6 +61,8 @@ associated with the Gauss–Jacobi grid for (N, α, β).
 
 Returns a vector of length N with callable functions ψ_i.
 """
+jacobi_dvr_basis(N::Integer, l::Real) = jacobi_dvr_basis(N, 0.0, 2l)
+
 function jacobi_dvr_basis(N::Integer, α::Real, β::Real)
     N < 1 && throw(DomainError(N, "N must be ≥ 1"))
     φ = jacobi_basis_L2(N, α, β)

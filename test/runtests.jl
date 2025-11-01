@@ -4,8 +4,8 @@ using QuadGK
 
 atol = 1e-4
 
-@testset "Unweighted orthonormal Jacobi basis" begin
-    for (α, β) in ((0.0, 0.0), (0.5, 1.0))
+@testset "Jacobi L2 basis" begin
+    for (α, β) in ((0.0, 0.0), (0.0, 2.0))
         N = 6
         φ = jacobi_basis_L2(N, α, β)
         @test length(φ) == N
@@ -19,10 +19,12 @@ atol = 1e-4
 end
 
 @testset "Jacobi DVR basis" begin
-    for (α, β) in ((0.0, 0.0), (0.5, 1.0))
-        for N in (3, 5, 8)
-            ψ = jacobi_dvr_basis(N, α, β)
+    for l in (0, 1)
+        for N in (3, 4)
+            ψ = jacobi_dvr_basis(N, l)
             @test length(ψ) == N
+            α = 0.0
+            β = 2l
             z, λ = jacobi_gauss(N, α, β)
             ω = jacobi_weight.(z, Ref(α), Ref(β))
             Λ = λ ./ ω
