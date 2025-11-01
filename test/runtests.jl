@@ -1,7 +1,7 @@
 using Test
 using Siegert
 using QuadGK
-using LinearAlgebra: Diagonal, diag, isdiag, norm, eigen
+using LinearAlgebra: Diagonal, Symmetric, diag, isdiag, norm, eigen
 
 atol = 1e-4
 
@@ -44,7 +44,7 @@ end
     end
 end
 
-@testset "SPS matrices (grid, L, ξ, H̃)" begin
+@testset "SPS matrices (grid, L, ξ, H̃, K̃)" begin
     for (N, l, a) in ((4, 0, 2.0), (5, 1, 3.0))
         K̃, ξ, L, H̃, z, Λ, ψ, r = sps_matrices(N, l, a, square_well_V)
         # Basic shapes and monotonic grid
@@ -65,11 +65,25 @@ end
         # ξ is r^2 on the diagonal (within FP tolerance)
         @test isapprox(diag(ξ), r .^ 2; atol = 1e-12, rtol = 0)
 
-        # With placeholder K̃ = 0, H̃ is purely diagonal with centrifugal term
-        diagH = diag(H̃)
-        @test all(isapprox.(H̃, Diagonal(diagH); atol = 1e-12, rtol = 0))
-        centrifugal = l * (l + 1) ./ (2 .* r .^ 2)
-        @test isapprox(diagH, centrifugal; atol = 1e-12, rtol = 0)
+        # K̃ should be symmetric positive semidefinite
+        @test isapprox(K̃, K̃'; atol = 1e-12, rtol = 0)
+        vals = eigen(Symmetric(K̃)).values
+        @test all(vals .>= -1e-12)
+    end
+
+    # Check 1/a scaling of K̃ numerically for fixed (N,l)
+    let N = 5, l = 0
+        K2, = begin
+            K̃, = sps_matrices(N, l, 2.0, square_well_V)
+        end
+        K3, = begin
+            K̃, = sps_matrices(N, l, 3.0, square_well_V)
+        end
+        # Expect K̃(a) ∝ 1/a: 2*K̃(2) ≈ 3*K̃(3) in Frobenius norm
+        A = 2 .* K2
+        B = 3 .* K3
+        relerr = norm(A .- B) / max(norm(B), 1e-12)
+        @test relerr < 5e-2
     end
 end
 

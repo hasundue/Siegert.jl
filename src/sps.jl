@@ -7,8 +7,9 @@
 # - Uses the Jacobi Gaussian DVR on x ∈ (-1, 1) with (α, β) = (0, 2l).
 # - Maps to the physical radial interval r ∈ (0, a) via r(x) = a (1 + x) / 2.
 # - Multiplicative operators (e.g., r², V(r)) are represented diagonally in DVR.
-# - The kinetic matrix K̃ is left as a TODO placeholder until the FBR→DVR
-#   formulas from Appendix C (C20–C21) are implemented.
+# - The kinetic matrix K̃ is implemented via an FBR→DVR transform using
+#   derivatives of the L2-orthonormal Jacobi basis φ_n and Gauss–Jacobi
+#   quadrature on the x-domain, with the mapping r(x).
 #
 # Public API (initial):
 # - sps_matrices(N, l, a, V) -> (K̃, ξ, L, H̃, z, Λ, ψ, r)
@@ -44,7 +45,67 @@ _diagonal_dvr(fvals::AbstractVector) = Diagonal(fvals)
 # Centrifugal potential term on r-grid (no singularity since r>0 for Gauss nodes)
 _centrifugal_diag(l::Real, r::AbstractVector) = (l * (l + 1)) ./ (2 .* (r .^ 2))
 
-# Assemble SPS matrices (without kinetic, placeholder K̃)
+# --- Kinetic energy via FBR→DVR ---
+
+# Derivative of Jacobi polynomial P_n^(α,β)(x)
+# d/dx P_n^(α,β)(x) = 0 for n=0; otherwise 0.5*(n+α+β+1) P_{n-1}^{(α+1,β+1)}(x)
+_jacobi_poly_derivative(x::Real, n::Integer, α::Real, β::Real) =
+    n == 0 ? 0.0 : 0.5 * (n + α + β + 1) * Jacobi.jacobi(x, n - 1, α + 1, β + 1)
+
+# Values of φ_n and φ_n' at Gauss–Jacobi nodes for given (N, α, β)
+# Returns z, Λ, Φ, dΦ with Φ[n,k] = φ_n(z_k), dΦ[n,k] = φ_n'(z_k)
+function _phi_vals_and_derivs(N::Integer, α::Real, β::Real)
+    # Gauss–Jacobi nodes/weights and discrete measure for unweighted L2
+    z, λ = jacobi_gauss(N, α, β)
+    ω = jacobi_weight.(z, Ref(α), Ref(β))
+    Λ = λ ./ ω
+
+    # Precompute sqrt weight and its derivative factor at nodes
+    sqrtω = sqrt.(ω)
+    # d/dx ln sqrt(ω) = -α/(2(1-x)) + β/(2(1+x))
+    dlog_sqrtω = @. (-α) / (2 * (1 - z)) + β / (2 * (1 + z))
+
+    # Allocate Φ and dΦ with indices [n, k]
+    Φ = zeros(Float64, N, N)
+    dΦ = zeros(Float64, N, N)
+
+    # Precompute norms h_n
+    hs = [jacobi_normsq(n - 1, α, β) for n = 1:N]
+
+    for n = 1:N
+        hn = hs[n]
+        invsqrt_h = 1 / sqrt(hn)
+        for k = 1:N
+            zk = z[k]
+            Pn = Jacobi.jacobi(zk, n - 1, α, β)
+            dPn = _jacobi_poly_derivative(zk, n - 1, α, β)
+            φnk = sqrtω[k] * invsqrt_h * Pn
+            Φ[n, k] = φnk
+            # φ' = sqrtω/√h * (P' + P * d/dx ln sqrtω)
+            dΦ[n, k] = sqrtω[k] * invsqrt_h * (dPn + Pn * dlog_sqrtω[k])
+        end
+    end
+
+    return z, Λ, Φ, dΦ
+end
+
+# Build kinetic matrix K̃ in the DVR basis using
+# K = (1/a) ∫ (dψ/dx)(dψ/dx) dx and the mapping r(x)
+# FBR (φ) representation: K_FBR = (1/a) dΦ * Diag(Λ) * dΦ'
+# DVR coefficients S = Diag(√Λ) * Φ'
+# => K̃ = S * K_FBR * S'
+function _kinetic_dvr(N::Integer, l::Real, a::Real)
+    α = 0.0
+    β = 2l
+    z, Λ, Φ, dΦ = _phi_vals_and_derivs(N, α, β)
+
+    K_FBR = (1 / a) * (dΦ * Diagonal(Λ) * dΦ')
+    S = Diagonal(sqrt.(Λ)) * Φ'
+    K̃ = S * K_FBR * S'
+    return K̃
+end
+
+# Assemble SPS matrices
 function sps_matrices(N::Integer, l::Real, a::Real, V::Function)
     N < 1 && throw(ArgumentError("N must be ≥ 1"))
     a <= 0 && throw(ArgumentError("a must be > 0"))
@@ -63,8 +124,8 @@ function sps_matrices(N::Integer, l::Real, a::Real, V::Function)
     U_diag = _centrifugal_diag(l, r) .+ V.(r)
     U = _diagonal_dvr(U_diag)
 
-    # TODO: K̃ via FBR→DVR transform (Appendix C). Placeholder zeros for now.
-    K̃ = zeros(N, N)
+    # Kinetic via FBR→DVR
+    K̃ = _kinetic_dvr(N, l, a)
 
     # Provisional Hamiltonian in DVR
     H̃ = K̃ + U
