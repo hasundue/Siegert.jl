@@ -47,10 +47,9 @@ _centrifugal_diag(l::Real, r::AbstractVector) = (l * (l + 1)) ./ (2 .* (r .^ 2))
 
 # --- Kinetic energy via FBR→DVR ---
 
-# Derivative of Jacobi polynomial P_n^(α,β)(x)
-# d/dx P_n^(α,β)(x) = 0 for n=0; otherwise 0.5*(n+α+β+1) P_{n-1}^{(α+1,β+1)}(x)
+# Derivative of Jacobi polynomial P_n^(α,β)(x) via Jacobi.djacobi
 _jacobi_poly_derivative(x::Real, n::Integer, α::Real, β::Real) =
-    n == 0 ? 0.0 : 0.5 * (n + α + β + 1) * Jacobi.jacobi(x, n - 1, α + 1, β + 1)
+    n == 0 ? 0.0 : Jacobi.djacobi(x, n, α, β)
 
 # Values of φ_n and φ_n' at Gauss–Jacobi nodes for given (N, α, β)
 # Returns z, Λ, Φ, dΦ with Φ[n,k] = φ_n(z_k), dΦ[n,k] = φ_n'(z_k)
@@ -69,21 +68,18 @@ function _phi_vals_and_derivs(N::Integer, α::Real, β::Real)
     Φ = zeros(Float64, N, N)
     dΦ = zeros(Float64, N, N)
 
-    # Precompute norms h_n
+    # Precompute norms and their inverse square roots
     hs = [jacobi_normsq(n - 1, α, β) for n = 1:N]
+    invsqrt_h = 1 ./ sqrt.(hs)
 
     for n = 1:N
-        hn = hs[n]
-        invsqrt_h = 1 / sqrt(hn)
-        for k = 1:N
-            zk = z[k]
-            Pn = Jacobi.jacobi(zk, n - 1, α, β)
-            dPn = _jacobi_poly_derivative(zk, n - 1, α, β)
-            φnk = sqrtω[k] * invsqrt_h * Pn
-            Φ[n, k] = φnk
-            # φ' = sqrtω/√h * (P' + P * d/dx ln sqrtω)
-            dΦ[n, k] = sqrtω[k] * invsqrt_h * (dPn + Pn * dlog_sqrtω[k])
-        end
+        # Vectorized values across nodes
+        Pn = Jacobi.jacobi.(z, n - 1, α, β)
+        dPn = n == 1 ? zeros(length(z)) : Jacobi.djacobi.(z, n - 1, α, β)
+        scale = invsqrt_h[n] .* sqrtω
+        Φ[n, :] = (scale .* Pn)'
+        # φ' = sqrtω/√h * (P' + P * d/dx ln sqrtω)
+        dΦ[n, :] = (scale .* (dPn .+ Pn .* dlog_sqrtω))'
     end
 
     return z, Λ, Φ, dΦ
