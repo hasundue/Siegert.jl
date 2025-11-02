@@ -13,7 +13,7 @@
 ### Pkg dependencies (normal + extras)
 - Never edit `Project.toml` or `Manifest.toml` by hand. Use `Pkg` for all dependency changes (including stdlibs like `LinearAlgebra`), and let it write files. Example: `julia --project -e 'using Pkg; Pkg.add("LinearAlgebra"); Pkg.resolve()'`.
 - Normal deps: `Pkg.add("PkgName")` / `Pkg.rm("PkgName")`.
-- Test-only deps: `Pkg.add("PkgName"; extra=true)` / `Pkg.rm("PkgName"; extra=true)`. Also list them under `[targets]` as `test = ["Test", "PkgName", ...]` (keep "Test" explicit here).
+- Test-only deps: `Pkg.add("PkgName"; target=:extras)` / `Pkg.rm("PkgName"; target=:extras)`. Also list them under `[targets]` as `test = ["Test", "PkgName", ...]` (keep "Test" explicit here).
 - Maintain `[compat]` manually when bumping versions.
 
 ## Workflow
