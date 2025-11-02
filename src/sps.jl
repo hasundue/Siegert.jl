@@ -16,8 +16,8 @@
 # - Multiplicative potential operators V(r) are diagonal in DVR.
 #
 # Symbol mapping (paper → code):
-# - ρ (metric multiplying k²) in paper is ρ in code
-# - Q(k) = H̃ − (b + i k a) L − k² ρ with H̃ = K̃ + U
+# - ρ (metric multiplying k²/2) in paper is ρ in code
+# - Eq. (C15): QEP (H̃ − (b + ika)L − k²/2 ρ)c = 0 with H̃ = K̃ + U
 # - Following TON 1998 Eq. (20) with matrices from Eq. (C24)
 #
 # Public API (initial):
@@ -121,38 +121,37 @@ function _transformation_matrix_T(N::Integer, α::Real, β::Real)
     return T
 end
 
-# Build kinetic matrix K̃^(ψ) in FBR via Eq. C21 from TON 1998 Appendix C
-# K̃^(ψ)_nm = (1/2) * [ δ_nm Σ_k ψ_k(1)² - ψ_n(1) ψ_m(1) ]
-# Reference: Tolstikhin et al., Phys. Rev. A 58, 2077 (1998), Eq. C21
 function _kinetic_fbr_ton(N::Integer, α::Real, β::Real, a::Real)
-    # Get boundary values ψ_n(1)
-    ψ_at_1 = jacobi_basis_at_1(N, α, β)
+    # Build kinetic matrix K̃^(ψ) in FBR via Eq. (C21a) and (C21b)
+    #
+    # Reference: Tolstikhin et al., Phys. Rev. A 58, 2077 (1998), Appendix C
+    # - Eq. (C21a): K̃^(ψ)_nm = φ_n(1)φ_m(1)[2Σ_{k=1}^{n-1} φ_k²(1) + φ_n²(1) - 1/2] for n < m
+    # - Eq. (C21b): K̃^(ψ)_nn = 2φ_n²(1)Σ_{k=1}^{n-1} φ_k²(1) + 1/2(φ_n²(1) - 1/2)²
+    # - By symmetry: K̃^(ψ)_nm = K̃^(ψ)_mn for n > m
 
-    # Compute Σ_k ψ_k(1)²
-    sum_psi_sq = sum(ψ_at_1 .^ 2)
+    # Get boundary values φ_n(1) (L2-orthonormal basis)
+    φ_at_1 = jacobi_basis_at_1(N, α, β)
 
     # Build K̃^(ψ) matrix
     K_psi = zeros(N, N)
+
     for n = 1:N
-        for m = 1:N
-            if n == m
-                K_psi[n, m] = (1/2) * (sum_psi_sq - ψ_at_1[n] * ψ_at_1[m])
-            else
-                K_psi[n, m] = -(1/2) * ψ_at_1[n] * ψ_at_1[m]
-            end
+        # Compute cumulative sum Σ_{k=1}^{n-1} φ_k²(1)
+        cum_sum = n == 1 ? 0.0 : sum(φ_at_1[k]^2 for k = 1:(n-1))
+
+        # Diagonal element: Eq. (C21b)
+        K_psi[n, n] = 2 * φ_at_1[n]^2 * cum_sum + 0.5 * (φ_at_1[n]^2 - 0.5)^2
+
+        # Off-diagonal elements: Eq. (C21a) for n < m, then use symmetry
+        for m = (n+1):N
+            K_psi[n, m] = φ_at_1[n] * φ_at_1[m] * (2 * cum_sum + φ_at_1[n]^2 - 0.5)
+            K_psi[m, n] = K_psi[n, m]  # Symmetry
         end
     end
 
     return K_psi
 end
 
-# Build kinetic matrix K̃ in the DVR basis using TON 1998 Appendix C method
-# K̃_ij = Σ_{n,m} T_ni K̃^(ψ)_nm T_mj  (Eq. C20)
-#
-# Reference: Tolstikhin et al., Phys. Rev. A 58, 2077 (1998), Appendix C
-# - Eq. C10: Transformation matrix T_ni = √(λ_i / w(x_i)) ψ_n(x_i)
-# - Eq. C20: K̃ = T^T K̃^(ψ) T
-# - Eq. C21: K̃^(ψ)_nm = (1/a) [δ_nm Σ_k ψ_k(1)² - ψ_n(1) ψ_m(1)]
 function _kinetic_dvr(N::Integer, l::Real, a::Real)
     α = 0.0
     β = 2l
@@ -164,7 +163,7 @@ function _kinetic_dvr(N::Integer, l::Real, a::Real)
     K_psi = _kinetic_fbr_ton(N, α, β, a)
 
     # Transform to DVR (Eq. C20)
-    K̃ = T' * K_psi * T
+    K̃ = T * K_psi * T
 
     return K̃
 end
@@ -238,10 +237,11 @@ end
 # Linearize QEP following TON 1998 Eq. (20) with matrices from Eq. (C24)
 #
 # Reference: Tolstikhin et al., Phys. Rev. A 58, 2077 (1998)
-# - Eq. (9): QEP (H̃ − (b + ika)L − k²ρ)c = 0
-# - Eq. (16): Standard QEP form (A + λB + λ²I)c = 0 with λ = ik
+# - Eq. (C15): QEP (H̃ − (b + ika)L − k²/2 ρ)c = 0
+# - Multiply by 2ρ⁻¹: (2ρ⁻¹(H̃ − bL) − 2ikaρ⁻¹L − k²I)c = 0
+# - Standard form: (A + λB + λ²I)c = 0 with λ = ik
+# - Eq. (C24): A = 2ρ⁻¹(H̃ − bL), B = −2aρ⁻¹L (factor 2 accounts for 1/2 in C15)
 # - Eq. (20): Companion linearization [0 I; -K -C][c; λc] = λ[c; λc]
-# - Eq. (C24): Matrices A = 2ρ⁻¹(H̃ − bL), B = −2aρ⁻¹L
 # - Standard companion form: K = −A, C = −B
 # - Solve eigenvalue problem: Ã y = λ y with y = [c; λc]
 #
@@ -259,16 +259,16 @@ function sps_linearize_qep(H̃, ρ, L, a; b::Real = 0.0)
 
     # Eq. (20): Standard companion linearization
     # For (A + λB + λ²I)c = 0, the companion form is:
-    # [0  I][c ]     [c ]
-    # [-K -C][λc] = λ[λc]  where K = -A, C = -B
+    # [0   I][ c]    [ c]
+    # [-A -B][λc] = λ[λc]
     Z = zeros(ComplexF64, N, N)
-    Ieye = Matrix{ComplexF64}(I, N, N)
+    # Ieye = Matrix{ComplexF64}(I, N, N)
 
-    K = -ComplexF64.(A)
-    C = -ComplexF64.(B)
+    # K = -ComplexF64.(A)
+    # C = -ComplexF64.(B)
 
     # Ã y = λ y
-    Ã = [Z Ieye; -K -C]
+    Ã = [Z I; -A -B]
     return Ã
 end
 
@@ -280,8 +280,8 @@ function sps_solve(N::Integer, l::Real, a::Real, V::Function; b::Real = 0.0)
     # Swap imag and real to get k from λ = ik
     k = -im .* F.values
     Y = F.vectors
-    C = Array(@view Y[1:N, :])
-    return k, C, (; Ã, H̃, ρ, L, z, Λ, ψ, r)
+    c = Array(@view Y[1:N, :])
+    return k, c, (; Ã, H̃, ρ, L, z, Λ, ψ, r)
 end
 
 # Convenience: square well V(r) = 0 inside [0,a]

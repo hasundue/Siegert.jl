@@ -12,7 +12,7 @@ using Logging: @debug, @warn
     V = _ -> V0
     # Paper baseline: 2N = 38 → N = 19
     N = 19
-    sps = solve_sps(N, l, a, V; b = 0.0)
+    sps = solve_sps(N, l, a, V)
 
     # # Filter those close to the imaginary axis and (optionally) log for Im>0 and Im<0
     # axis_eps = 1e-8
