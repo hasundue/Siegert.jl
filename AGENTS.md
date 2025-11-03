@@ -18,15 +18,14 @@
 
 ## Workflow
 - Commit messages (pre-1.0): use `<scope>: body` style. Example: `dvr: return ψ, z, Λ from jacobi_dvr_basis; update tests/examples`.
-- Before pushing: `treefmt -c`, then `julia --project -e 'using Pkg; Pkg.test()'`.
+- Before pushing: `treefmt -c`, then `just test`.
 
 ## Testing
-- All tests: `julia --project -e 'using Pkg; Pkg.test()'`.
-- Single file: `julia --project test/<file>.jl`.
-- Name filter: `using Test; Test.@testset filter = t -> occursin("NAME", string(t)); include("test/runtests.jl")`.
+- All tests: `just test`.
+- Specific test(s): `just test dvr` or `just test dvr waves`. (Preferred during development.)
 
 ## Code Style
-- 2-space indent; ≲100 cols; trailing commas on multiline; one export per line; triple-quoted docstrings.
+- 4-space indent; ≲100 cols; trailing commas on multiline; one export per line; triple-quoted docstrings.
 
 ## Imports
 - Group stdlib, external, local; one per line; prefer `using`; qualify on conflicts; alphabetize groups.
