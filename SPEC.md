@@ -104,14 +104,18 @@ complex-conjugate `P_n`.
 Implement the partial and total DOS as
 
 ```text
-χ_l(k) = -(1/π) Im ∫_0^R dr 2(2l+1) G_l(r,r;k) / r^2
+χ_l(k) = -(1/π) Im ∫_0^R dr 2(2l+1) G_l(r,r;k)
 χ(k)   = Σ_l χ_l(k).
 ```
 
-The published SS23 Eqs. (16)-(19) omit the `/r^2` factor. The density
-equation SS23 Eq. (13), the definition SS23 Eq. (9), and S15 Eq. (15) all
-require it. This SPEC treats the omission as a typographical error and uses the
-dimensionally consistent form above.
+This is the published SS23 Eqs. (16)-(17). The DOS is a volume integral:
+the 3D volume element `4π r^2 dr` cancels the `1/r^2` in the local density
+`G_l/r^2`, so no `/r^2` appears. Equivalently, the 3D Green's function is
+`G_3D = Σ_l (2l+1)/(4π) G_l/r^2`, and the DOS is
+`-(2/π) Im ∫_0^R 4π r^2 dr G_3D`. The single-state formulas SS23
+Eqs. (18)-(19) follow from the same cancellation and the normalization
+`∫_0^R P_n^2 dr = 1`. The earlier SPEC draft incorrectly treated the
+missing `/r^2` as a typo; the published PRE PDF resolves this.
 
 ### 4. Electron density
 
@@ -121,8 +125,8 @@ Use the decomposition
 n_e(r) = n_bound(r) + n_cont(r).
 ```
 
-Bound states are the Siegert states with `Re(k_n) = 0` and `Im(k_n) > 0`.
-Their contribution is
+Bound states are the Siegert states with `Re(k_n) = 0` (within numerical
+tolerance) and `Im(k_n) > 0`. Their contribution is
 
 ```text
 n_bound(r) = Σ_{l} Σ_{n bound}
@@ -250,10 +254,10 @@ remain testable without reaching into private functions.
       `P_n(r)^2 / k_n` on the common grid to a relative tolerance of `1e-6`.
       verify: `just test average_atom`
 
-- [ ] For the free potential `V = 0`, the corrected DOS `siegert_dos` is
-      positive for real `k > 0` and approaches the free-electron value
-      `V k / π^2` as `N` and `R` grow. The test uses a tolerance and a
-      convergence check rather than a hard absolute value.
+- [ ] For the free potential `V = 0`, the DOS `siegert_dos` is positive for
+      real `k > 0` and approaches the free-electron value `V k / π^2` as `N`
+      and `R` grow. The test uses a tolerance and a convergence check rather
+      than a hard absolute value.
       verify: `just test average_atom`
 
 - [ ] With a deep square well and `μ` chosen so the continuum is empty, the
@@ -314,11 +318,13 @@ remain testable without reaching into private functions.
   second continuum integrator to hide the disagreement.
 - The sign or prefactor of SS23 Eq. (13) cannot be resolved from the
   free-particle and neutrality tests -> stop and report.
-- The DOS `/r^2` correction becomes material: for example, it contradicts a
-  reliable published source, or a test cannot be resolved without deciding
-  whether the published omission is intentional -> stop and ask for the
-  published PDF or an erratum. Do not silently change the formula or fit a
-  factor.
+- Neutrality fails because bound-state wavefunction tails outside `R` are not
+  counted in the cell integral -> stop and report. Do not add an ad hoc tail
+  correction without a decision.
+- The DOS or density normalization becomes material: for example, a factor of
+  `4π` or `r^2` cannot be resolved from the volume-integral derivation and the
+  published equations -> stop and report. Do not silently change the formula
+  or fit a factor.
 - A required reference cannot be obtained or opened -> stop and report which
   reference is missing. Do not substitute a secondary summary or an
   unauthorized copy; the user will provide the published PDF.
@@ -342,18 +348,21 @@ remain testable without reaching into private functions.
   Negative `E_min` is an option, not the default.
 - 2026-10-29 -- Use 4-point Gauss-Legendre panels as in S15 Appendix B; no new
   quadrature dependency.
-- 2026-10-29 -- Implement the DOS with `/r^2`. The published SS23 Eqs.
-  (16)-(19) omit it, but SS23 Eq. (13), SS23 Eq. (9), and S15 Eq. (15) require
-  it. Record this as a typographical correction. The Zotero copy of the
-  published SS23 PDF and the arXiv source both show the omission; this is a
-  formula question, not a missing-reference question.
-- 2026-10-29 -- Treat the `/r^2` factor and related normalization factors as a
-  known high-risk point: TON98 and BT07 are not fully consistent in some
-  related formulas. If the factor becomes material, stop and ask for the
-  published PDF/erratum instead of fitting the result.
+- 2026-10-29 -- DOS uses the published volume-integral form:
+  `χ_l(k) = -(1/π) Im ∫_0^R dr 2(2l+1) G_l(r,r;k)`, with no `/r^2`. The
+  `4π r^2` volume element cancels the `1/r^2` in `G_3D`; the single-state
+  Eqs. (18)-(19) are consistent with `∫P_n^2 dr = 1`. The published PRE PDF
+  (Zotero attachment `YZ7IGZKR`) and the volume-element derivation agree.
+- 2026-10-29 -- Treat normalization and prefactors as high-risk: TON98, BT07,
+  and SS23 are not fully consistent in some related formulas. If a factor
+  discrepancy becomes material, stop and ask for the published PDF/erratum
+  instead of fitting the result.
 - 2026-10-29 -- If a needed reference cannot be accessed, stop and report it;
   the user will provide the published PDF or an erratum. Do not substitute a
   secondary summary or an unauthorized copy.
+- 2026-10-29 -- The cell density and DOS use the paper's domain `0 ≤ r ≤ R`.
+  Bound-state tails outside `R` are not counted. If this prevents neutrality,
+  stop and report; do not patch the density with an unagreed tail term.
 - 2026-10-29 -- Normalize inside `SPS`; `SPS.coefficients` become normalized,
   and `SPS` stores `normalizations` and `dvr`.
 - 2026-10-29 -- M1 uses Hartree units. M2 will convert eV and g/cm³ at the
@@ -369,16 +378,14 @@ remain testable without reaching into private functions.
 - **M3**: finite-temperature KSDT exchange-correlation, pressure/entropy,
   and comparison with the SS23 figures and Tartarus.
 
-## Blocker
+## Resolved blocker
 
-2026-10-29 -- The only SS23 PDF in Zotero (attachment `X7Y7Y4YX`) is the
-arXiv v1 preprint, not the published PRE article. Its PDF metadata reports
-`CreationDate: 2022-12-14`, page 1 carries `arXiv:2212.06229v1` and
-"(Dated: December 14, 2022)", and it has no PRE header or page number
-`025204`. The DOS equations in this preprint (Eqs. (16)-(19)) omit `/r^2`;
-the published version or an erratum may differ. Per the `/r^2` stop condition,
-M1 stops before implementation until the published PRE PDF or an erratum is
-available. No code has been changed.
+2026-10-29 -- The published PRE PDF is now in Zotero (attachment `YZ7IGZKR`,
+DOI 10.1103/PhysRevE.107.025204, PDF metadata title "Average-atom model with
+Siegert states"). It confirms that SS23 Eqs. (16)-(19) have no `/r^2`. This is
+not a typo: the DOS is a volume integral and the `4π r^2` element cancels the
+`1/r^2` in `G_3D`. The earlier `/r^2` concern was an error in the SPEC draft,
+not in the paper. M1 is unblocked. No code has been changed.
 
 ## Confirmed
 
