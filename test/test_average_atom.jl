@@ -46,12 +46,19 @@ end
 
 relative_l2(a, b) = sqrt(sum((a .- b) .^ 2) / sum(b .^ 2))
 
+# SS23 Eq. (6) / BT07 Eq. (37): the Siegert inner product is bilinear, with
+# no complex conjugation. `eq6_matrix` assembles the full normalized Gram
+# matrix from the DVR coefficients, metric, and surface term; it must equal I.
 @testset "Average atom: Siegert normalization" begin
     V = square_well(-112.5, 1.0)
+
+    # Raw states stay unnormalized for scattering-only use; the AA layer must
+    # ask for normalization explicitly.
     raw = SPS(12, 0, V, 1.0)
     @test isempty(raw.normalizations)
     @test_throws ArgumentError siegert_wavefunction(raw)
 
+    # Include all 2N+l states, hence also the complex resonant pairs.
     for l = 0:2
         sps = normalize_sps(SPS(12, l, V, 1.0))
         @test !isempty(sps.normalizations)
@@ -59,21 +66,26 @@ relative_l2(a, b) = sqrt(sum((a .- b) .^ 2) / sum(b .^ 2))
     end
 end
 
+# DVR cardinality gives P(r_j) = r_j c_j / kappa_j on the native grid, so this
+# checks the FBR/DVR transform and the P = r phi convention. The common grid is
+# the l = 0 grid; every partial wave must be evaluable there for Green sums.
 @testset "Average atom: wavefunction evaluation" begin
     V = square_well(-112.5, 1.0)
     a = 1.0
-    for l = 0:2
-        sps = normalize_sps(SPS(12, l, V, a))
+    states = [normalize_sps(SPS(12, l, V, a)) for l = 0:2]
+    common_r, _ = common_radial_grid(states)
+
+    for sps in states
         P = siegert_wavefunction(sps)
         expected = reshape(sps.grid, :, 1) .* sps.coefficients ./ sps.dvr.coefficients
         @test maximum(abs.(P - expected)) < 1e-10
         @test P[:, 1] == siegert_wavefunction(sps, sps.grid)[:, 1]
 
-        common_r, _ = common_radial_grid(sps)
         P_common = siegert_wavefunction(sps, common_r)
         @test size(P_common) == (length(common_r), length(sps.momenta))
         @test all(isfinite, P_common)
 
+        # Boundary value used by Eq. (6): P(R) = a pi(1)^T c.
         boundary = a * sum(sps.dvr.basis[:, end] .* sps.coefficients[:, 1])
         @test isapprox(siegert_wavefunction(sps, [a])[1, 1], boundary; rtol = 1e-10)
     end
