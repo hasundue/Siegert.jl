@@ -180,8 +180,13 @@ function sps_linearize_qep(H̃, ρ, L, a, π, z::AbstractVector)
     return M
 end
 
+abstract type AbstractSPS end
+
 """
 SPS (Siegert Pseudostate) solution data structure.
+
+This is the raw eigenproblem result. Average-atom data such as the DVR basis,
+normalized coefficients, and normalization constants live in `AverageAtomSPS`.
 
 Fields:
 - `momenta`: Complex momenta k (Siegert eigenvalues)
@@ -192,10 +197,8 @@ Fields:
 - `hamiltonian`: Provisional Hamiltonian H̃ in DVR
 - `metric`: Metric matrix ρ in DVR
 - `boundary`: Boundary matrix L
-- `normalizations`: Raw normalization constants N_n; empty for a raw `SPS`
-- `dvr`: DVR basis data used to build the states
 """
-struct SPS
+struct SPS <: AbstractSPS
     momenta::Vector{ComplexF64}
     coefficients::Matrix{ComplexF64}
     grid::Vector{Float64}
@@ -204,85 +207,17 @@ struct SPS
     hamiltonian::Matrix{Float64}
     metric::Matrix{Float64}
     boundary::Matrix{Float64}
-    normalizations::Vector{ComplexF64}
-    dvr::DVR
 end
 
-"""
-Compute the SPS normalization constants and rescale the DVR coefficients.
-
-The normalization follows SS23 Eq. (6) and BT07 Eq. (37). The radial
-wavefunction is `P_n(r) = r * Σ_i c_{i,n} π_i(x)`, so the volume term is
-`(a/2) c_n^T ρ c_n` and the surface value is `P_n(a) = a π(a)^T c_n`.
-
-The coefficients are rescaled in place. The raw constants are returned.
-"""
-function normalize_sps!(
-    coefficients::Matrix{ComplexF64},
-    momenta::Vector{ComplexF64},
-    metric::Matrix{Float64},
-    dvr::DVR,
-    a::Real,
-    l::Integer,
-)
-    z = reverse_bessel_zeros(l)
-    π_at_boundary = dvr.basis[:, end]
-    norm = Vector{ComplexF64}(undef, length(momenta))
-    factors = Vector{ComplexF64}(undef, length(momenta))
-
-    for i in eachindex(momenta)
-        c = view(coefficients, :, i)
-        k = momenta[i]
-        P = a * sum(π_at_boundary .* c)
-        surface = one(ComplexF64)
-        for zp in z
-            surface += zp / (im * k * a + zp)^2
-        end
-        interior = (a / 2) * sum(c .* (metric * c))
-        norm[i] = interior + im * P^2 / (2 * k) * surface
-        factors[i] = sqrt(norm[i])
-    end
-
-    coefficients ./= reshape(factors, 1, :)
-    return norm
-end
-
-"""
-    normalize_sps(sps::SPS) -> SPS
-
-Return a new `SPS` whose coefficients satisfy SS23 Eq. (6) and whose
-`normalizations` field contains the raw constants `N_n`. The input is not
-modified.
-
-# Example
-```julia
-raw = SPS(19, 0, square_well(-112.5, 1.0), 1.0)
-sps = normalize_sps(raw)
-```
-"""
-function normalize_sps(sps::SPS)
-    coefficients = copy(sps.coefficients)
-    norm = normalize_sps!(
-        coefficients,
-        sps.momenta,
-        sps.metric,
-        sps.dvr,
-        sps.box_size,
-        sps.angular_momentum,
-    )
-    return SPS(
-        sps.momenta,
-        coefficients,
-        sps.grid,
-        sps.box_size,
-        sps.angular_momentum,
-        sps.hamiltonian,
-        sps.metric,
-        sps.boundary,
-        norm,
-        sps.dvr,
-    )
-end
+# Accessors shared by raw and average-atom Siegert states.
+momenta(s::SPS) = s.momenta
+coefficients(s::SPS) = s.coefficients
+grid(s::SPS) = s.grid
+box_size(s::SPS) = s.box_size
+angular_momentum(s::SPS) = s.angular_momentum
+hamiltonian(s::SPS) = s.hamiltonian
+metric(s::SPS) = s.metric
+boundary(s::SPS) = s.boundary
 
 """
     SPS(N, l, V, a) -> SPS
@@ -297,7 +232,8 @@ Solve the SPS quadratic eigenvalue problem for Siegert states. [TON98, BT07]
 
 # Returns
 - `SPS`: raw Siegert pseudostate solution containing the `2N + l` eigenvalues
-  and eigenvectors. Call `normalize_sps` before using the average-atom layer.
+  and eigenvectors. Wrap it in `AverageAtomSPS` before using the
+  average-atom layer.
 
 # Example
 ```julia
@@ -307,6 +243,11 @@ sps = SPS(19, 1, V, 1.0)  # p-wave
 ```
 """
 function SPS(N::Integer, l::Integer, V::Function, a::Real)
+    sps, _ = _solve_sps(N, l, V, a)
+    return sps
+end
+
+function _solve_sps(N::Integer, l::Integer, V::Function, a::Real)
     l < 0 && throw(ArgumentError("l must be ≥ 0"))
     K̃, ρ, L, H̃, dvr, r, π = sps_matrices(N, l, a, V)
     z = reverse_bessel_zeros(l)
@@ -315,7 +256,7 @@ function SPS(N::Integer, l::Integer, V::Function, a::Real)
     k = -im .* F.values
     Y = F.vectors
     c = ComplexF64.(Array(@view Y[1:N, :]))
-    return SPS(
+    sps = SPS(
         ComplexF64.(k),
         c,
         Float64.(r),
@@ -324,7 +265,6 @@ function SPS(N::Integer, l::Integer, V::Function, a::Real)
         Matrix{Float64}(H̃),
         Matrix{Float64}(ρ),
         Matrix{Float64}(L),
-        ComplexF64[],
-        dvr,
     )
+    return sps, dvr
 end

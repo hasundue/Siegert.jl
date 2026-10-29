@@ -65,13 +65,14 @@ and BT07 Eq. (37). Rescale `c_n ← c_n / sqrt(N_n)`. The square root uses
 Julia's principal branch; the overall sign cancels in every M1 observable
 because they are quadratic in `P_n`.
 
-Keep `SPS` as the raw eigenproblem result: `SPS.coefficients` stay raw and
-`SPS.normalizations` is empty. Add `normalize_sps(sps)` that returns a new
-`SPS` with the normalized coefficients and the raw constants populated. The
-AA driver normalizes its states once; scattering-only use never pays the
-normalization cost. The DVR object is stored in `SPS` so that normalization
-and wavefunction evaluation do not rebuild it. Existing SPS tests that use
-only `momenta` must continue to pass.
+Keep `SPS` as the pure raw eigenproblem result. Add `AverageAtomSPS`, which
+wraps `sps::SPS` and stores the normalized coefficients, the raw normalization
+constants, and the DVR basis. The AA driver constructs `AverageAtomSPS` once
+per state; scattering-only use never pays the normalization cost and `SPS`
+stores no average-atom data. `AbstractSPS` defines the common accessor
+interface. `_solve_sps` returns both the raw `SPS` and its DVR so the driver
+does not rebuild the basis. Existing SPS tests that use only `momenta` must
+continue to pass.
 
 ### 2. Evaluate wavefunctions on a common radial grid
 
@@ -207,26 +208,29 @@ M2 self-consistent loop.
 
 Proposed public names (one export per line, as required by the project style):
 
-- `SPS`: gains `dvr::DVR` and `normalizations::Vector{ComplexF64}`. A raw
-  `SPS` has raw `coefficients` and empty `normalizations`.
-- `normalize_sps(sps::SPS)` -> `SPS`: return a normalized state without
-  modifying the input.
-- `siegert_wavefunction(sps::SPS)` -> `Matrix{ComplexF64}` on `sps.grid`.
-- `siegert_wavefunction(sps::SPS, r::AbstractVector)` -> `Matrix{ComplexF64}`
-  on the requested radii.
-- `siegert_green(sps::SPS, k::Number; r=sps.grid)` -> `Vector{ComplexF64}` of
-  diagonal Green's-function values on `r`.
-- `siegert_dos(sps::SPS, k::Number; r, weights)` -> `Float64` for one `l`.
-- `siegert_dos(states::AbstractVector{SPS}, k::Number; r, weights)` ->
-  `Float64` for the total.
+- `AbstractSPS`: common abstract type for raw and average-atom states.
+- `SPS`: raw eigenproblem result; no average-atom data.
+- `AverageAtomSPS`: wraps `sps::SPS` and stores normalized coefficients, raw
+  normalization constants, and the DVR basis.
+- `siegert_wavefunction(aa::AverageAtomSPS)` -> `Matrix{ComplexF64}` on
+  `grid(aa)`.
+- `siegert_wavefunction(aa::AverageAtomSPS, r::AbstractVector)` ->
+  `Matrix{ComplexF64}` on the requested radii.
+- `siegert_green(aa::AverageAtomSPS, k::Number; r=grid(aa))` ->
+  `Vector{ComplexF64}` of diagonal Green's-function values on `r`.
+- `siegert_dos(aa::AverageAtomSPS, k::Number; r, weights)` -> `Float64` for
+  one `l`.
+- `siegert_dos(states::AbstractVector{<:AverageAtomSPS}, k::Number; r,
+  weights)` -> `Float64` for the total.
 - `fermi_dirac(ε, μ, T)` -> `Float64`.
 - `matsubara_energies(μ, T; E_min, E_max, E_I)` -> `Vector{ComplexF64}`.
 - `siegert_density(states, μ, T; ...)` -> `Vector{Float64}` on the common grid.
 - `chemical_potential(states, Z, R, T; ...)` -> `(μ, density, residual)`.
 - `fixed_potential_density(V, Z, R, T; N=150, l_max=10, ...)` ->
   `AADensity`.
-- `AADensity`: result struct with `density`, `chemical_potential`, `states`,
-  `grid`, `radius`, `temperature`, `neutrality_residual`, and `contour`.
+- `AADensity`: result struct with `density`, `chemical_potential`,
+  `states::Vector{AverageAtomSPS}`, `grid`, `radius`, `temperature`,
+  `neutrality_residual`, and `contour`.
 - `Contour`, `contour_parameters`, `common_radial_grid`, and `volume_weights`
   are exported helpers so the driver result and the quadrature are testable
   without private functions.
@@ -246,13 +250,13 @@ remain testable without reaching into private functions.
 
 ## Acceptance criteria
 
-- [ ] `SPS` states satisfy SS23 Eq. (6) for all states of a square well with
-      `N = 12`, `l = 0, 1, 2`: the normalized inner product is `δ_nm` to
-      `1e-8` or better, including complex states.
+- [ ] `AverageAtomSPS` states satisfy SS23 Eq. (6) for all states of a square
+      well with `N = 12`, `l = 0, 1, 2`: the normalized inner product is
+      `δ_nm` to `1e-8` or better, including complex states.
       verify: `just test average_atom`
 
-- [ ] `siegert_wavefunction(sps, r)` reproduces the native-grid values on
-      `sps.grid` to `1e-10` for `l = 0, 1, 2`, and evaluates all `l` on the
+- [ ] `siegert_wavefunction(aa, r)` reproduces the native-grid values on
+      `grid(aa)` to `1e-10` for `l = 0, 1, 2`, and evaluates all `l` on the
       `l = 0` grid without errors.
       verify: `just test average_atom`
 
@@ -369,10 +373,11 @@ remain testable without reaching into private functions.
 - 2026-10-29 -- The cell density and DOS use the paper's domain `0 ≤ r ≤ R`.
   Bound-state tails outside `R` are not counted. If this prevents neutrality,
   stop and report; do not patch the density with an unagreed tail term.
-- 2026-10-29 -- Do not normalize inside `SPS`. Keep `SPS` raw and expose
-  `normalize_sps(sps)`; the AA driver calls it once per state. This keeps
-  scattering-only use free of normalization cost and of the near-null
-  normalization singularity. `SPS` stores `dvr` so the DVR is not rebuilt.
+- 2026-10-29 -- Split the raw and average-atom layers. `SPS` is the raw
+  eigenproblem result; `AverageAtomSPS` wraps it with normalized coefficients,
+  normalizations, and the DVR basis. `AbstractSPS` defines the common accessor
+  interface. Scattering-only use never builds average-atom data; the AA driver
+  constructs `AverageAtomSPS` once per state.
 - 2026-10-29 -- M1 uses Hartree units. M2 will convert eV and g/cm³ at the
   public API boundary.
 - 2026-10-29 -- M2/M3 XC remains pluggable: a simple XC first, KSDT later.

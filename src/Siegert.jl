@@ -9,6 +9,8 @@ using Jacobi: zgrjp, wgrjp
 using LinearAlgebra: Diagonal, eigen, I
 using SpecialFunctions: loggamma
 
+export AbstractSPS
+export AverageAtomSPS
 export DVR
 export SPS
 export square_well
@@ -21,7 +23,6 @@ export contour_parameters
 export fermi_dirac
 export fixed_potential_density
 export matsubara_energies
-export normalize_sps
 export siegert_density
 export siegert_dos
 export siegert_green
