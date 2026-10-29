@@ -314,8 +314,14 @@ remain testable without reaching into private functions.
   second continuum integrator to hide the disagreement.
 - The sign or prefactor of SS23 Eq. (13) cannot be resolved from the
   free-particle and neutrality tests -> stop and report.
-- The DOS `/r^2` correction is challenged by a reference that shows the
-  published form is intentional -> stop and ask before changing the formula.
+- The DOS `/r^2` correction becomes material: for example, it contradicts a
+  reliable published source, or a test cannot be resolved without deciding
+  whether the published omission is intentional -> stop and ask for the
+  published PDF or an erratum. Do not silently change the formula or fit a
+  factor.
+- A required reference cannot be obtained or opened -> stop and report which
+  reference is missing. Do not substitute a secondary summary or an
+  unauthorized copy; the user will provide the published PDF.
 - A change is needed outside `src/dvr.jl`, `src/sps.jl`, a new
   `src/average_atom.jl` (or `src/greens.jl`), `src/Siegert.jl`,
   `test/test_average_atom.jl`, and the related docstrings -> stop.
@@ -338,7 +344,16 @@ remain testable without reaching into private functions.
   quadrature dependency.
 - 2026-10-29 -- Implement the DOS with `/r^2`. The published SS23 Eqs.
   (16)-(19) omit it, but SS23 Eq. (13), SS23 Eq. (9), and S15 Eq. (15) require
-  it. Record this as a typographical correction.
+  it. Record this as a typographical correction. The Zotero copy of the
+  published SS23 PDF and the arXiv source both show the omission; this is a
+  formula question, not a missing-reference question.
+- 2026-10-29 -- Treat the `/r^2` factor and related normalization factors as a
+  known high-risk point: TON98 and BT07 are not fully consistent in some
+  related formulas. If the factor becomes material, stop and ask for the
+  published PDF/erratum instead of fitting the result.
+- 2026-10-29 -- If a needed reference cannot be accessed, stop and report it;
+  the user will provide the published PDF or an erratum. Do not substitute a
+  secondary summary or an unauthorized copy.
 - 2026-10-29 -- Normalize inside `SPS`; `SPS.coefficients` become normalized,
   and `SPS` stores `normalizations` and `dvr`.
 - 2026-10-29 -- M1 uses Hartree units. M2 will convert eV and g/cm³ at the
