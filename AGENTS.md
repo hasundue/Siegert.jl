@@ -5,7 +5,8 @@
 
 ## Environment
 - Julia 1.13.x; enter dev shell with `nix develop`.
-- Julia packages live in the project-local depot `.julia/` (gitignored). Run `just install-lsp` once to add the LSP server there.
+- Julia packages live in the project-local depot `.julia/` (gitignored); `~/.julia` is appended as a secondary depot for shared tooling.
+- The nvim LSP environment `@nvim-lspconfig` is shared in `~/.julia` and symlinked into the project depot by the devShell. Run `just install-lsp` to update it.
 
 ## Setup
 - `julia --project -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'`.

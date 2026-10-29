@@ -77,8 +77,15 @@
               treefmt
             ];
             shellHook = ''
-              # Keep the Julia depot at the project root (gitignored).
-              export JULIA_DEPOT_PATH="$(git rev-parse --show-toplevel 2>/dev/null || echo "$PWD")/.julia"
+              # Keep project packages in the repository, but let the shared LSP
+              # tooling resolve from the user depot. gitignore covers .julia/.
+              julia_root="$(git rev-parse --show-toplevel 2>/dev/null || echo "$PWD")"
+              export JULIA_DEPOT_PATH="$julia_root/.julia:$HOME/.julia"
+              lsp_env="$julia_root/.julia/environments/nvim-lspconfig"
+              if [ -e "$HOME/.julia/environments/nvim-lspconfig" ] && [ ! -e "$lsp_env" ]; then
+                mkdir -p "$(dirname "$lsp_env")"
+                ln -s "$HOME/.julia/environments/nvim-lspconfig" "$lsp_env"
+              fi
               # Julia JLLs (libgfortran/libquadmath) are not found otherwise.
               export LD_LIBRARY_PATH="${
                 pkgs.lib.makeLibraryPath [ pkgs.gfortran.cc.lib ]
