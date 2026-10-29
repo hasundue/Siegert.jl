@@ -69,10 +69,17 @@
           default = pkgs.mkShell {
             packages = with pkgs; [
               julia
+              just
               nixfmt
               treefmt
             ];
-            shellHook = git-hooks.shellHook;
+            shellHook = ''
+              # Julia JLLs (libgfortran/libquadmath) are not found otherwise.
+              export LD_LIBRARY_PATH="${
+                pkgs.lib.makeLibraryPath [ pkgs.gfortran.cc.lib ]
+              }''${LD_LIBRARY_PATH:+:}''$LD_LIBRARY_PATH"
+              ${git-hooks.shellHook}
+            '';
           };
         }
       );
