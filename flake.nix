@@ -10,10 +10,6 @@
       url = "github:numtide/treefmt-nix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-    zotero-mcp-src = {
-      url = "github:54yyyu/zotero-mcp";
-      flake = false;
-    };
   };
   outputs =
     {
@@ -21,14 +17,11 @@
       nixpkgs,
       git-hooks-nix,
       treefmt-nix,
-      zotero-mcp-src,
     }:
     let
       systems = [
         "x86_64-linux"
-        "aarch64-linux"
         "x86_64-darwin"
-        "aarch64-darwin"
       ];
       forEachSystem =
         f:
@@ -40,10 +33,6 @@
               inherit system;
               config.allowUnfree = false;
             };
-            lib = nixpkgs.lib // {
-              git-hooks-nix = git-hooks-nix.lib;
-              treefmt-nix = treefmt-nix.lib;
-            };
           }
         );
     in
@@ -51,17 +40,10 @@
       devShells = forEachSystem (
         {
           pkgs,
-          lib,
           system,
         }:
         let
-          # Use Julia 1.11 for compatibility with withPackages
-          # julia = pkgs.julia_111-bin.withPackages [
-          #   "JuliaFormatter"
-          #   "Plots"
-          #   "TestEnv"
-          # ];
-          treefmt = lib.treefmt-nix.mkWrapper pkgs {
+          treefmt = treefmt-nix.lib.mkWrapper pkgs {
             programs.nixfmt.enable = true;
             settings.formatter.julia = {
               command = "julia";
@@ -73,7 +55,7 @@
               includes = [ "*.jl" ];
             };
           };
-          git-hooks = lib.git-hooks-nix.${system}.run {
+          git-hooks = git-hooks-nix.lib.${system}.run {
             src = ./.;
             hooks = {
               treefmt = {
@@ -82,21 +64,13 @@
               };
             };
           };
-          zotero-mcp = pkgs.writeShellScriptBin "zotero-mcp" ''
-            export LD_LIBRARY_PATH="${
-              pkgs.lib.makeLibraryPath [ pkgs.stdenv.cc.cc.lib ]
-            }''${LD_LIBRARY_PATH:+:}''$LD_LIBRARY_PATH"
-            exec ${pkgs.uv}/bin/uvx \
-              --python ${pkgs.python312}/bin/python3 \
-              --from ${zotero-mcp-src} zotero-mcp "$@"
-          '';
         in
         {
           default = pkgs.mkShell {
             packages = with pkgs; [
-              # julia
+              julia
+              nixfmt
               treefmt
-              zotero-mcp
             ];
             shellHook = git-hooks.shellHook;
           };
