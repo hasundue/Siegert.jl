@@ -1,6 +1,51 @@
 using Test
 using Siegert
-using LinearAlgebra: norm
+using SpecialFunctions: besselj, bessely
+
+spherical_j(l, x) = sqrt(π / (2x)) * besselj(l + 0.5, x)
+spherical_y(l, x) = sqrt(π / (2x)) * bessely(l + 0.5, x)
+
+function spherical_j_derivative(l, x)
+    l == 0 && return -spherical_j(1, x)
+    return spherical_j(l - 1, x) - (l + 1) / x * spherical_j(l, x)
+end
+
+function spherical_y_derivative(l, x)
+    l == 0 && return -spherical_y(1, x)
+    return spherical_y(l - 1, x) - (l + 1) / x * spherical_y(l, x)
+end
+
+"""
+Analytic phase shift for a finite square well from spherical-Bessel matching.
+"""
+function analytic_phase_shift(l, V0, a, k)
+    E = k^2 / 2
+    q = sqrt(2 * (E - V0))
+    L_int = q * spherical_j_derivative(l, q * a) / spherical_j(l, q * a)
+    num = L_int * spherical_j(l, k * a) - k * spherical_j_derivative(l, k * a)
+    den = L_int * spherical_y(l, k * a) - k * spherical_y_derivative(l, k * a)
+    return atan(num, den)
+end
+
+"""
+Distance between two phases, reduced modulo π.
+"""
+function phase_difference(δ1, δ2)
+    return abs(mod(δ1 - δ2 + π / 2, π) - π / 2)
+end
+
+@testset "SPS API and eigenvalue count" begin
+    a = 1.0
+    V = square_well(-112.5, a)
+
+    @test !hasmethod(SPS, Tuple{Integer,Integer,Function,Real,Real})
+    @test_throws ArgumentError SPS(8, -1, V, a)
+
+    for l = 0:2
+        sps = SPS(12, l, V, a)
+        @test length(sps.momenta) == 2 * 12 + l
+    end
+end
 
 @testset "Phase shift for square-well potential" begin
     a = 1.0
@@ -11,7 +56,7 @@ using LinearAlgebra: norm
     k = 20.0
 
     function test_phase_shift(N, rtol)
-        sps = SPS(N, l, V, a, -1.0)
+        sps = SPS(N, l, V, a)
         S = scattering_matrix(sps)
         δ_num = 0.5 * atan(imag(S(k)), real(S(k)))
         m = round(Int, (δ_num - δ_theory) / π)
@@ -25,5 +70,36 @@ using LinearAlgebra: norm
 
     @testset "2N=50 (12-digit accuracy)" begin
         test_phase_shift(25, 1e-11)
+    end
+end
+
+@testset "Phase shift for nonzero angular momenta" begin
+    a = 1.0
+    V0 = -112.5
+    V = square_well(V0, a)
+    k = 20.0
+
+    for l in (1, 2)
+        δ_ref = analytic_phase_shift(l, V0, a, k)
+
+        for (N, tol) in ((25, 1e-5), (35, 1e-8))
+            sps = SPS(N, l, V, a)
+            S = scattering_matrix(sps)(k)
+            δ_num = 0.5 * atan(imag(S), real(S))
+            @test phase_difference(δ_num, δ_ref) <= tol
+        end
+    end
+end
+
+@testset "Free-particle scattering matrix" begin
+    a = 1.0
+    V = r -> 0.0
+
+    for l = 0:2
+        sps = SPS(12, l, V, a)
+        S = scattering_matrix(sps)
+        for k in (0.5, 1.0, 2.5)
+            @test isapprox(S(k), 1.0; atol = 1e-10, rtol = 0)
+        end
     end
 end

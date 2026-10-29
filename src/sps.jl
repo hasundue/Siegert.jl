@@ -1,7 +1,11 @@
-# Reference
+# References
 # - O. I. Tolstikhin, V. N. Ostrovsky, and H. Nakamura,
 #   "Siegert pseudostate formulation of scattering theory: One-channel case,"
 #   Phys. Rev. A 58, 2077–2095 (1998). doi:10.1103/PhysRevA.58.2077 [TON98]
+# - D. A. Batishchev and O. I. Tolstikhin,
+#   "Siegert pseudostate formulation of scattering theory: Nonzero angular momenta
+#   in the one-channel case," Phys. Rev. A 75, 062704 (2007).
+#   doi:10.1103/PhysRevA.75.062704 [BT07]
 
 """
 Map x ∈ [-1, 1] to r ∈ [0, a].
@@ -9,7 +13,7 @@ Map x ∈ [-1, 1] to r ∈ [0, a].
 x_to_r(x, a) = a * (1 + x) / 2
 
 """
-Build boundary matrix L = π_i(1)π_j(1) from DVR basis matrix. [TON98 Eq.(C19)]
+Build boundary matrix L = π_i(1)π_j(1) from DVR basis matrix. [TON98 Eq.(C18)]
 """
 function boundary_matrix(π::Matrix{<:Real})
     π_at_1 = π[:, end]
@@ -22,9 +26,12 @@ Diagonal DVR matrix for multiplicative operator f(r) at grid points.
 diagonal_dvr(fvals::AbstractVector) = Diagonal(fvals)
 
 """
-Centrifugal potential l(l+1)/(2r²) on r-grid. [TON98 Eq.(1)]
+Centrifugal term l(l+1)/2 in the TON98 radial equation. [TON98 Eq.(C4)]
+
+After dividing the TON98 equation by r², this term gives the usual
+centrifugal potential l(l+1)/(2r²).
 """
-centrifugal_potential(l::Real, r::AbstractVector) = (l * (l + 1)) ./ (2 .* r .^ 2)
+centrifugal_term(l::Real) = l * (l + 1) / 2
 
 """
 Build kinetic matrix K̃^(φ) in FBR using φ basis. [TON98 Eq.(C21a,C21b)]
@@ -90,30 +97,87 @@ function sps_matrices(N::Integer, l::Real, a::Real, V::Function)
     L = boundary_matrix(π)
     ρ = metric_dvr(x, T, l, a)
 
-    U_diag = centrifugal_potential(l, r) .+ (r .^ 2) .* V.(r)
+    U_diag = centrifugal_term(l) .+ (r .^ 2) .* V.(r)
     U = diagonal_dvr(U_diag)
 
     K̃ = kinetic_dvr(T, φ)
     H̃ = K̃ + U
 
-    return K̃, ρ, L, H̃, x, r
+    return K̃, ρ, L, H̃, x, r, π[:, end]
 end
 
 """
-Linearize QEP to standard eigenvalue problem. [TON98 Eq.(20,C24)]
+Return the zeros z_{l,p}, p = 1..l, of the reverse Bessel polynomial θ_l.
+
+θ_0(z) = 1, θ_1(z) = z + 1, and
+θ_l(z) = (2l - 1) θ_{l-1}(z) + z² θ_{l-2}(z) for l ≥ 2. [BT07]
 """
-function sps_linearize_qep(H̃, ρ, L, a; b::Real = 0.0)
+function reverse_bessel_zeros(l::Integer)
+    l < 0 && throw(ArgumentError("l must be ≥ 0"))
+    l == 0 && return Float64[]
+    l == 1 && return [-1.0]
+
+    # Polynomial coefficients in ascending powers of z.
+    θ_prev2 = [1.0]      # θ_0
+    θ_prev1 = [1.0, 1.0] # θ_1
+    θ = θ_prev1
+    for n = 2:l
+        θ = zeros(Float64, n + 1)
+        θ[1:(n)] .+= (2n - 1) .* θ_prev1
+        θ[3:(n+1)] .+= θ_prev2
+        θ_prev2, θ_prev1 = θ_prev1, θ
+    end
+
+    # Monic coefficients in descending powers of z.
+    coeffs = reverse(θ)
+    C = zeros(Float64, l, l)
+    for i = 1:(l-1)
+        C[i+1, i] = 1.0
+    end
+    for i = 1:l
+        C[i, end] = -coeffs[end-i+1]
+    end
+
+    return ComplexF64.(eigen(C).values)
+end
+
+"""
+Linearize the QEP to a standard eigenvalue problem. [TON98 Eq.(20,C24); BT07 Eq.(31)]
+
+The angular momentum enters through the zeros z of the reverse Bessel
+polynomial and gives a problem of dimension 2N + l.
+"""
+function sps_linearize_qep(H̃, ρ, L, a, π, z::AbstractVector)
     N = size(H̃, 1)
     size(H̃, 2) == N || throw(ArgumentError("H̃ must be square"))
     size(ρ) == (N, N) || throw(ArgumentError("ρ must be N×N"))
     size(L) == (N, N) || throw(ArgumentError("L must be N×N"))
+    length(π) == N || throw(ArgumentError("π must have length N"))
 
+    l = length(z)
     ρ_inv = inv(ρ)
-    A = 2 * ρ_inv * (H̃ - b * L)
+    A = 2 * ρ_inv * (H̃ + L)
     B = -2 * a * ρ_inv * L
-    O = zeros(N, N)
 
-    return [O I; -A -B]
+    if l == 0
+        O = zeros(N, N)
+        return [O I; -A -B]
+    end
+
+    M = zeros(ComplexF64, 2N + l, 2N + l)
+    for i = 1:N
+        M[i, N+i] = 1.0
+    end
+    M[(N+1):(2N), 1:N] .= -A
+    M[(N+1):(2N), (N+1):(2N)] .= -B
+    coupling = 2 .* (ρ_inv * π)
+    for p = 1:l
+        M[(N+1):(2N), 2N+p] .= coupling
+        M[2N+p, 1:N] .= -(z[p] / a) .* π
+        M[2N+p, 2N+p] = -z[p] / a
+    end
+
+    return M
 end
 
 """
@@ -141,29 +205,32 @@ struct SPS
 end
 
 """
-    SPS(N, l, V, a, b) -> SPS
+    SPS(N, l, V, a) -> SPS
 
-Solve SPS quadratic eigenvalue problem for Siegert states. [TON98]
+Solve the SPS quadratic eigenvalue problem for Siegert states. [TON98, BT07]
 
 # Arguments
 - `N::Integer`: Number of DVR basis functions
-- `l::Integer`: Angular momentum quantum number
+- `l::Integer`: Non-negative angular momentum quantum number
 - `V::Function`: Potential energy function V(r)
 - `a::Real`: Box size (cutoff radius)
-- `b::Real`: Boundary parameter (-1 for 3D spherical waves, see TON98 Appendix C, Eq. C1c)
 
 # Returns
-- `SPS`: Siegert pseudostate solution containing eigenvalues and eigenvectors
+- `SPS`: Siegert pseudostate solution containing the `2N + l` eigenvalues and
+  eigenvectors
 
 # Example
 ```julia
 V = square_well(-112.5, 1.0)
-sps = SPS(19, 0, V, 1.0, -1.0)  # 3D spherical wave with s-wave (l=0)
+sps = SPS(19, 0, V, 1.0)  # s-wave
+sps = SPS(19, 1, V, 1.0)  # p-wave
 ```
 """
-function SPS(N::Integer, l::Integer, V::Function, a::Real, b::Real)
-    K̃, ρ, L, H̃, x, r = sps_matrices(N, l, a, V)
-    AL = sps_linearize_qep(H̃, ρ, L, a; b = b)
+function SPS(N::Integer, l::Integer, V::Function, a::Real)
+    l < 0 && throw(ArgumentError("l must be ≥ 0"))
+    K̃, ρ, L, H̃, x, r, π = sps_matrices(N, l, a, V)
+    z = reverse_bessel_zeros(l)
+    AL = sps_linearize_qep(H̃, ρ, L, a, π, z)
     F = eigen(AL)
     k = -im .* F.values
     Y = F.vectors
