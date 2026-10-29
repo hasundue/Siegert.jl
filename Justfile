@@ -2,13 +2,17 @@
 #
 # Usage:
 #   - Ensure you're in the Nix dev shell: `nix develop`
-#   - Run: `just install-lsp`
-#
-# This installs Julia LSP tooling into the `nvim-lspconfig` environment
-# the server, try: `julia --project=@nvim-lspconfig ...` instead.
+#   - Run `just install-lsp` once to populate the Julia LSP environment in the
+#     project-local depot (`.julia`).
 
 install-lsp:
-	julia --project=@nvim-lspconfig -e 'using Pkg; Pkg.add(["LanguageServer","SymbolServer","StaticLint","JuliaFormatter"]); Pkg.precompile()'
+	#!/usr/bin/env bash
+	set -euo pipefail
+	if [ -z "${JULIA_DEPOT_PATH:-}" ]; then
+		echo "error: enter the dev shell with \`nix develop\` first" >&2
+		exit 1
+	fi
+	julia --project=@nvim-lspconfig -e 'using Pkg; Pkg.add("LanguageServer"); Pkg.precompile()'
 
 test *targets:
 	#!/usr/bin/env bash

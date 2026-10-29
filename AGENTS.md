@@ -5,6 +5,7 @@
 
 ## Environment
 - Julia 1.13.x; enter dev shell with `nix develop`.
+- Julia packages live in the project-local depot `.julia/` (gitignored). Run `just install-lsp` once to add the LSP server there.
 
 ## Setup
 - `julia --project -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'`.
