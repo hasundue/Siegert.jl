@@ -43,5 +43,5 @@
 ## Nix & Formatting
 - Keep `flake.nix` formatted; `treefmt` uses `nixfmt`; don’t bypass hooks.
 
-## Research (Zotero MCP)
-- Read-only. If `http://127.0.0.1:23119` is reachable (Zotero 7 Local API), use it to search/read. Assume project papers are in the `Siegert.jl` collection to constrain lookups. All edits happen in Zotero.
+## Research (Zotero)
+- Read-only. Use the `zotero-pdf` skill (Zotero 7 Local API, `http://127.0.0.1:23119`) to search for and read papers, and `pdf-tools` for extraction. Assume project papers are in the `Siegert.jl` collection to constrain lookups. All edits happen in Zotero.
