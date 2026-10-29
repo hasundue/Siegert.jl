@@ -389,4 +389,4 @@ not in the paper. M1 is unblocked. No code has been changed.
 
 ## Confirmed
 
-<!-- Filled only after the user gives an explicit yes. -->
+2026-10-29 -- user: "M1 を開始してください"
