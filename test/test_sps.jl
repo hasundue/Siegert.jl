@@ -28,6 +28,13 @@ function analytic_phase_shift(l, V0, a, k)
 end
 
 """
+Scattering length from the product formula. [BT07 Eq.(89)]
+"""
+function scattering_length(sps)
+    return sps.box_size + sum(im / kn for kn in sps.momenta)
+end
+
+"""
 Distance between two phases, reduced modulo π.
 """
 function phase_difference(δ1, δ2)
@@ -88,6 +95,46 @@ end
             δ_num = 0.5 * atan(imag(S), real(S))
             @test phase_difference(δ_num, δ_ref) <= tol
         end
+    end
+end
+
+@testset "Scattering length" begin
+    @testset "Rectangular potential" begin
+        V = square_well(-112.5, 1.0)
+        κ = sqrt(-2 * -112.5)
+        α_exact = 1.0 - tan(κ) / κ
+        α_paper = 1.057_066_227
+
+        α17 = scattering_length(SPS(17, 0, V, 1.0))
+        @test isapprox(real(α17), α_paper; atol = 1e-9, rtol = 0)
+        @test abs(imag(α17)) < 1e-10
+
+        α25 = scattering_length(SPS(25, 0, V, 1.0))
+        @test isapprox(real(α25), α_exact; atol = 1e-12, rtol = 0)
+        @test abs(imag(α25)) < 1e-10
+    end
+
+    @testset "Eckart potential (paper Table I)" begin
+        eckart(a) = r -> r > a ? 0.0 : -21.0 / cosh(r)^2
+        table =
+            ((6, 29, 2.458575), (8, 33, 2.450348), (10, 37, 2.450011), (12, 40, 2.450000))
+
+        for (a, N, α_paper) in table
+            α = scattering_length(SPS(N, 0, eckart(a), a))
+            @test isapprox(real(α), α_paper; atol = 1e-6, rtol = 0)
+            @test abs(imag(α)) < 1e-10
+        end
+    end
+end
+
+@testset "Bound-state count for rectangular potential (paper Fig. 1)" begin
+    V = square_well(-112.5, 1.0)
+    expected = (5, 4, 4, 3, 3, 2, 2, 2, 1, 1, 1, 0)
+
+    for l = 0:11
+        sps = SPS(20, l, V, 1.0)
+        nbound = count(k -> abs(real(k)) < 1e-8 && imag(k) > 0, sps.momenta)
+        @test nbound == expected[l+1]
     end
 end
 
