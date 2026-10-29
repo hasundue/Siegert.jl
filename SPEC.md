@@ -248,12 +248,11 @@ remain testable without reaching into private functions.
 
 - [ ] `SPS` states satisfy SS23 Eq. (6) for all states of a square well with
       `N = 12`, `l = 0, 1, 2`: the normalized inner product is `δ_nm` to
-      `1e-8` or better, including complex states.
-      verify: `just test average_atom`
-
-- [ ] For bound states of the existing square well, the ordinary normalization
-      `∫_0^∞ P_n(r)^2 dr = 1` holds to `1e-8` or better when the DVR volume
-      integral is combined with the analytic tail `P_n(R)^2/(2κ)`.
+      `1e-8` or better, including complex states. For the `l = 0` bound states
+      (checked with `N = 20`), the diagonal of Eq. (6) also reduces to the
+      ordinary normalization `∫_0^R P_n^2 dr + P_n(R)^2/(2κ) = 1` to `1e-8`
+      or better. This is a derived bound-state check, not a separate
+      normalization condition.
       verify: `just test average_atom`
 
 - [ ] `siegert_wavefunction(sps, r)` reproduces the native-grid values on

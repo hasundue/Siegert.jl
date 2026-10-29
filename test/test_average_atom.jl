@@ -57,13 +57,11 @@ relative_l2(a, b) = sqrt(sum((a .- b) .^ 2) / sum(b .^ 2))
         @test !isempty(sps.normalizations)
         @test maximum(abs.(eq6_matrix(sps) - I)) < 1e-8
     end
-end
 
-@testset "Average atom: bound-state normalization" begin
-    V = square_well(-112.5, 1.0)
+    # For l = 0 bound states, the diagonal of Eq. (6) reduces to the ordinary
+    # normalization with the exponential tail P(R)^2/(2κ).
     a = 1.0
     sps = normalize_sps(SPS(20, 0, V, a))
-    r = sps.grid
     weights = (a / 2) .* sps.dvr.weights
     P = siegert_wavefunction(sps)
     for i in eachindex(sps.momenta)
