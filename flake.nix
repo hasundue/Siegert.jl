@@ -43,10 +43,13 @@
           system,
         }:
         let
+          # Keep the formatter reproducible instead of relying on a
+          # version-specific global environment (~/.julia/environments).
+          juliaFormatter = pkgs.julia.withPackages [ "JuliaFormatter" ];
           treefmt = treefmt-nix.lib.mkWrapper pkgs {
             programs.nixfmt.enable = true;
             settings.formatter.julia = {
-              command = "julia";
+              command = "${juliaFormatter}/bin/julia";
               options = [
                 "-e"
                 "using JuliaFormatter; JuliaFormatter.format(collect(ARGS))"
