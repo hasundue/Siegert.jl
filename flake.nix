@@ -77,6 +77,8 @@
               treefmt
             ];
             shellHook = ''
+              # Keep the Julia depot at the project root (gitignored).
+              export JULIA_DEPOT_PATH="$(git rev-parse --show-toplevel 2>/dev/null || echo "$PWD")/.julia"
               # Julia JLLs (libgfortran/libquadmath) are not found otherwise.
               export LD_LIBRARY_PATH="${
                 pkgs.lib.makeLibraryPath [ pkgs.gfortran.cc.lib ]
