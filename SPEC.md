@@ -369,6 +369,17 @@ remain testable without reaching into private functions.
 - **M3**: finite-temperature KSDT exchange-correlation, pressure/entropy,
   and comparison with the SS23 figures and Tartarus.
 
+## Blocker
+
+2026-10-29 -- The only SS23 PDF in Zotero (attachment `X7Y7Y4YX`) is the
+arXiv v1 preprint, not the published PRE article. Its PDF metadata reports
+`CreationDate: 2022-12-14`, page 1 carries `arXiv:2212.06229v1` and
+"(Dated: December 14, 2022)", and it has no PRE header or page number
+`025204`. The DOS equations in this preprint (Eqs. (16)-(19)) omit `/r^2`;
+the published version or an erratum may differ. Per the `/r^2` stop condition,
+M1 stops before implementation until the published PRE PDF or an erratum is
+available. No code has been changed.
+
 ## Confirmed
 
 <!-- Filled only after the user gives an explicit yes. -->
