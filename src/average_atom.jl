@@ -83,11 +83,18 @@ volume_weights(r::AbstractVector{<:Real}, weights::AbstractVector{<:Real}) =
 
 Evaluate all normalized radial Siegert states of `sps` on `sps.grid`.
 
-The returned matrix has one row per grid point and one column per state, with
+`sps` must already be normalized with `normalize_sps`. The returned matrix has
+one row per grid point and one column per state, with
 `P_{n,l}(r) = r Σ_i c_{i,n} π_i(x(r))`.
 """
 function siegert_wavefunction(sps::SPS)
     return siegert_wavefunction(sps, sps.grid)
+end
+
+function _require_normalized(sps::SPS)
+    isempty(sps.normalizations) &&
+        throw(ArgumentError("SPS is not normalized; call normalize_sps(sps) first"))
+    return sps
 end
 
 """
@@ -95,10 +102,11 @@ end
 
 Evaluate all normalized radial Siegert states of `sps` on the radii `r`.
 
-`r` must lie in `[0, R]`. The returned matrix has one row per radius and one
-column per state.
+`sps` must already be normalized with `normalize_sps`. `r` must lie in
+`[0, R]`. The returned matrix has one row per radius and one column per state.
 """
 function siegert_wavefunction(sps::SPS, r::AbstractVector)
+    _require_normalized(sps)
     all(0 .<= r .<= sps.box_size) || throw(DomainError(r, "radii must lie in [0, R]"))
     l = sps.angular_momentum
     N = size(sps.coefficients, 1)
@@ -592,7 +600,7 @@ function fixed_potential_density(
 )
     N > 0 || throw(ArgumentError("N must be positive"))
     l_max >= 0 || throw(ArgumentError("l_max must be non-negative"))
-    states = [SPS(N, l, V, R) for l = 0:l_max]
+    states = [normalize_sps(SPS(N, l, V, R)) for l = 0:l_max]
     mu, density, residual = chemical_potential(
         states,
         Z,

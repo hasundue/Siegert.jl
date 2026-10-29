@@ -21,6 +21,7 @@ export contour_parameters
 export fermi_dirac
 export fixed_potential_density
 export matsubara_energies
+export normalize_sps
 export siegert_density
 export siegert_dos
 export siegert_green

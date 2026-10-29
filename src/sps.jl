@@ -103,7 +103,7 @@ function sps_matrices(N::Integer, l::Real, a::Real, V::Function)
     K̃ = kinetic_dvr(T, φ)
     H̃ = K̃ + U
 
-    return K̃, ρ, L, H̃, x, r, π[:, end]
+    return K̃, ρ, L, H̃, dvr, r, π[:, end]
 end
 
 """
@@ -185,14 +185,14 @@ SPS (Siegert Pseudostate) solution data structure.
 
 Fields:
 - `momenta`: Complex momenta k (Siegert eigenvalues)
-- `coefficients`: Normalized expansion coefficients C in DVR basis
+- `coefficients`: Raw expansion coefficients C in DVR basis
 - `grid`: Grid points r on [0,a]
 - `box_size`: Box size a
 - `angular_momentum`: Angular momentum quantum number l
 - `hamiltonian`: Provisional Hamiltonian H̃ in DVR
 - `metric`: Metric matrix ρ in DVR
 - `boundary`: Boundary matrix L
-- `normalizations`: Raw normalization constants N_n before rescaling
+- `normalizations`: Raw normalization constants N_n; empty for a raw `SPS`
 - `dvr`: DVR basis data used to build the states
 """
 struct SPS
@@ -248,6 +248,43 @@ function normalize_sps!(
 end
 
 """
+    normalize_sps(sps::SPS) -> SPS
+
+Return a new `SPS` whose coefficients satisfy SS23 Eq. (6) and whose
+`normalizations` field contains the raw constants `N_n`. The input is not
+modified.
+
+# Example
+```julia
+raw = SPS(19, 0, square_well(-112.5, 1.0), 1.0)
+sps = normalize_sps(raw)
+```
+"""
+function normalize_sps(sps::SPS)
+    coefficients = copy(sps.coefficients)
+    norm = normalize_sps!(
+        coefficients,
+        sps.momenta,
+        sps.metric,
+        sps.dvr,
+        sps.box_size,
+        sps.angular_momentum,
+    )
+    return SPS(
+        sps.momenta,
+        coefficients,
+        sps.grid,
+        sps.box_size,
+        sps.angular_momentum,
+        sps.hamiltonian,
+        sps.metric,
+        sps.boundary,
+        norm,
+        sps.dvr,
+    )
+end
+
+"""
     SPS(N, l, V, a) -> SPS
 
 Solve the SPS quadratic eigenvalue problem for Siegert states. [TON98, BT07]
@@ -259,8 +296,8 @@ Solve the SPS quadratic eigenvalue problem for Siegert states. [TON98, BT07]
 - `a::Real`: Box size (cutoff radius)
 
 # Returns
-- `SPS`: Siegert pseudostate solution containing the `2N + l` eigenvalues and
-  eigenvectors
+- `SPS`: raw Siegert pseudostate solution containing the `2N + l` eigenvalues
+  and eigenvectors. Call `normalize_sps` before using the average-atom layer.
 
 # Example
 ```julia
@@ -271,15 +308,13 @@ sps = SPS(19, 1, V, 1.0)  # p-wave
 """
 function SPS(N::Integer, l::Integer, V::Function, a::Real)
     l < 0 && throw(ArgumentError("l must be ≥ 0"))
-    K̃, ρ, L, H̃, x, r, π = sps_matrices(N, l, a, V)
+    K̃, ρ, L, H̃, dvr, r, π = sps_matrices(N, l, a, V)
     z = reverse_bessel_zeros(l)
     AL = sps_linearize_qep(H̃, ρ, L, a, π, z)
     F = eigen(AL)
     k = -im .* F.values
     Y = F.vectors
     c = ComplexF64.(Array(@view Y[1:N, :]))
-    dvr = DVR(N, l)
-    norm = normalize_sps!(c, ComplexF64.(k), Matrix{Float64}(ρ), dvr, a, l)
     return SPS(
         ComplexF64.(k),
         c,
@@ -289,7 +324,7 @@ function SPS(N::Integer, l::Integer, V::Function, a::Real)
         Matrix{Float64}(H̃),
         Matrix{Float64}(ρ),
         Matrix{Float64}(L),
-        norm,
+        ComplexF64[],
         dvr,
     )
 end

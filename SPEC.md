@@ -65,8 +65,12 @@ and BT07 Eq. (37). Rescale `c_n ← c_n / sqrt(N_n)`. The square root uses
 Julia's principal branch; the overall sign cancels in every M1 observable
 because they are quadratic in `P_n`.
 
-Store the raw normalization constants and the DVR object in `SPS`, and make
-`SPS.coefficients` the normalized coefficients. Existing SPS tests that use
+Keep `SPS` as the raw eigenproblem result: `SPS.coefficients` stay raw and
+`SPS.normalizations` is empty. Add `normalize_sps(sps)` that returns a new
+`SPS` with the normalized coefficients and the raw constants populated. The
+AA driver normalizes its states once; scattering-only use never pays the
+normalization cost. The DVR object is stored in `SPS` so that normalization
+and wavefunction evaluation do not rebuild it. Existing SPS tests that use
 only `momenta` must continue to pass.
 
 ### 2. Evaluate wavefunctions on a common radial grid
@@ -203,8 +207,10 @@ M2 self-consistent loop.
 
 Proposed public names (one export per line, as required by the project style):
 
-- `SPS`: gains `normalizations::Vector{ComplexF64}` and `dvr::DVR`; its
-  `coefficients` become normalized.
+- `SPS`: gains `dvr::DVR` and `normalizations::Vector{ComplexF64}`. A raw
+  `SPS` has raw `coefficients` and empty `normalizations`.
+- `normalize_sps(sps::SPS)` -> `SPS`: return a normalized state without
+  modifying the input.
 - `siegert_wavefunction(sps::SPS)` -> `Matrix{ComplexF64}` on `sps.grid`.
 - `siegert_wavefunction(sps::SPS, r::AbstractVector)` -> `Matrix{ComplexF64}`
   on the requested radii.
@@ -368,8 +374,10 @@ remain testable without reaching into private functions.
 - 2026-10-29 -- The cell density and DOS use the paper's domain `0 ≤ r ≤ R`.
   Bound-state tails outside `R` are not counted. If this prevents neutrality,
   stop and report; do not patch the density with an unagreed tail term.
-- 2026-10-29 -- Normalize inside `SPS`; `SPS.coefficients` become normalized,
-  and `SPS` stores `normalizations` and `dvr`.
+- 2026-10-29 -- Do not normalize inside `SPS`. Keep `SPS` raw and expose
+  `normalize_sps(sps)`; the AA driver calls it once per state. This keeps
+  scattering-only use free of normalization cost and of the near-null
+  normalization singularity. `SPS` stores `dvr` so the DVR is not rebuilt.
 - 2026-10-29 -- M1 uses Hartree units. M2 will convert eV and g/cm³ at the
   public API boundary.
 - 2026-10-29 -- M2/M3 XC remains pluggable: a simple XC first, KSDT later.

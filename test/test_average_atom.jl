@@ -48,8 +48,13 @@ relative_l2(a, b) = sqrt(sum((a .- b) .^ 2) / sum(b .^ 2))
 
 @testset "Average atom: Siegert normalization" begin
     V = square_well(-112.5, 1.0)
+    raw = SPS(12, 0, V, 1.0)
+    @test isempty(raw.normalizations)
+    @test_throws ArgumentError siegert_wavefunction(raw)
+
     for l = 0:2
-        sps = SPS(12, l, V, 1.0)
+        sps = normalize_sps(SPS(12, l, V, 1.0))
+        @test !isempty(sps.normalizations)
         @test maximum(abs.(eq6_matrix(sps) - I)) < 1e-8
     end
 end
@@ -57,7 +62,7 @@ end
 @testset "Average atom: bound-state normalization" begin
     V = square_well(-112.5, 1.0)
     a = 1.0
-    sps = SPS(20, 0, V, a)
+    sps = normalize_sps(SPS(20, 0, V, a))
     r = sps.grid
     weights = (a / 2) .* sps.dvr.weights
     P = siegert_wavefunction(sps)
@@ -75,7 +80,7 @@ end
     V = square_well(-112.5, 1.0)
     a = 1.0
     for l = 0:2
-        sps = SPS(12, l, V, a)
+        sps = normalize_sps(SPS(12, l, V, a))
         P = siegert_wavefunction(sps)
         expected = reshape(sps.grid, :, 1) .* sps.coefficients ./ sps.dvr.coefficients
         @test maximum(abs.(P - expected)) < 1e-10
@@ -93,7 +98,7 @@ end
 
 @testset "Average atom: Green's-function residue" begin
     V = square_well(-112.5, 1.0)
-    sps = SPS(20, 0, V, 1.0)
+    sps = normalize_sps(SPS(20, 0, V, 1.0))
     r = sps.grid
     P = siegert_wavefunction(sps)
     index = findfirst(k -> abs(real(k)) < 1e-8 && imag(k) > 0, sps.momenta)
@@ -109,7 +114,7 @@ end
     R_values = (1.0, 2.0)
     N_values = (5, 6, 7)
     for N in N_values, R in R_values
-        states = [SPS(N, l, r -> 0.0, R) for l = 0:5]
+        states = [normalize_sps(SPS(N, l, r -> 0.0, R)) for l = 0:5]
         r, weights = common_radial_grid(states)
         for k in (0.5, 1.0, 2.0)
             dos = siegert_dos(states, k; r = r, weights = weights)
@@ -126,7 +131,7 @@ end
     R = 1.0
     T = 0.1
     mu = -10.0
-    states = [SPS(20, l, V, R) for l = 0:2]
+    states = [normalize_sps(SPS(20, l, V, R)) for l = 0:2]
     r, _ = common_radial_grid(states)
     density = siegert_density(states, mu, T)
     reference = bound_density(states, r, mu, T)
@@ -141,7 +146,7 @@ end
     V = r -> r >= R ? 0.0 : -20.0 * (1 - (r / R)^2)^2
     T = 1.0
     mu = 0.5
-    states = [SPS(30, l, V, R) for l = 0:3]
+    states = [normalize_sps(SPS(30, l, V, R)) for l = 0:3]
     reference = siegert_density(states, mu, T)
 
     more_panels = siegert_density(states, mu, T; n_vert = 2, n_horiz = 40, n_return = 40)
