@@ -51,17 +51,19 @@ Green's-function use.
 For every state `n` of an `SPS`, compute
 
 ```text
-N_n = c_n^T ρ c_n
+N_n = (a/2) c_n^T ρ c_n
       + i P_n(R)^2 / (2 k_n)
         * [1 + Σ_{p=1}^l z_lp / (i k_n R + z_lp)^2]
 ```
 
 where `c_n` is the raw DVR coefficient vector, `ρ` is the DVR metric,
-`P_n(R) = π_N^T c_n` is the boundary value, and `z_lp` are the reverse-Bessel
-zeros. This is SS23 Eq. (6) with `m = n` and BT07 Eq. (37). Rescale
-`c_n ← c_n / sqrt(N_n)`. The square root uses Julia's principal branch; the
-overall sign cancels in every M1 observable because they are quadratic in
-`P_n`.
+`P_n(R) = a π_N^T c_n` is the boundary value of the radial function
+`P_{n,l}(r) = r Σ_i c_{i,n} π_i(x(r))`, and `z_lp` are the reverse-Bessel
+zeros. The factors `a/2` and `a` come from `dr = (a/2) dx` and
+`P = r φ`; the earlier draft omitted them. This is SS23 Eq. (6) with `m = n`
+and BT07 Eq. (37). Rescale `c_n ← c_n / sqrt(N_n)`. The square root uses
+Julia's principal branch; the overall sign cancels in every M1 observable
+because they are quadratic in `P_n`.
 
 Store the raw normalization constants and the DVR object in `SPS`, and make
 `SPS.coefficients` the normalized coefficients. Existing SPS tests that use
@@ -76,7 +78,7 @@ partial waves. Add an evaluator for the DVR/FBR basis at arbitrary `x`:
 ```text
 φ_n(x) = sqrt(w(x) / h_n) P_n^{(0, 2l)}(x)
 π_i(x) = Σ_n T_{ni} φ_n(x)
-P_{n,l}(r) = Σ_i c_{i,n} π_i(x(r))
+P_{n,l}(r) = r Σ_i c_{i,n} π_i(x(r))
 ```
 
 using the existing `T`, `w`, `h_n`, and `jacobi` machinery. Evaluate every
@@ -219,6 +221,9 @@ Proposed public names (one export per line, as required by the project style):
   `AADensity`.
 - `AADensity`: result struct with `density`, `chemical_potential`, `states`,
   `grid`, `radius`, `temperature`, `neutrality_residual`, and `contour`.
+- `Contour`, `contour_parameters`, `common_radial_grid`, and `volume_weights`
+  are exported helpers so the driver result and the quadrature are testable
+  without private functions.
 
 Names may be adjusted during implementation, but the driver and result must
 remain testable without reaching into private functions.
@@ -369,6 +374,19 @@ remain testable without reaching into private functions.
   public API boundary.
 - 2026-10-29 -- M2/M3 XC remains pluggable: a simple XC first, KSDT later.
   This is a roadmap decision, not part of M1.
+- 2026-10-29 -- Implementation: the radial Siegert function is
+  `P = r φ`, so the volume term is `(a/2) c^T ρ c` and the boundary value is
+  `P(R) = a π_N^T c`. With these factors SS23 Eq. (6) holds to about `1e-12`
+  for the square-well test in `l = 0, 1, 2`.
+- 2026-10-29 -- Implementation: the Jacobi norms use `loggamma` and the
+  Jacobi polynomials use a local three-term recurrence. The external
+  `jacobi`/`gamma` path overflows near `N = 100`, which would block the
+  required `N = 150` convergence test. Existing DVR and SPS tests are
+  unchanged.
+- 2026-10-29 -- Implementation: the free-electron DOS test uses `N = 5, 6, 7`
+  and `R = 1, 2`. For `V = 0`, some SPS bilinear norms approach zero at
+  `N >= 8`, so the real-axis DOS becomes ill-conditioned; the contour +
+  Matsubara density is unaffected because it stays away from the real axis.
 
 ## Roadmap (not accepted by this SPEC)
 
