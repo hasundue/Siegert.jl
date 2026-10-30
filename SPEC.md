@@ -294,6 +294,29 @@ as the density backend while keeping the Siegert states for the bound sum, DOS,
 and resonance API. Then run a short self-consistent check at `N=100/150` with
 the physical tolerances.
 
+### C factor and l>0 validation (2026-10-30)
+
+- Free `l=0,1,2` checks: `direct_G` matches `r^2 j_l(kr) h^+_l(kr)` with a
+  constant ratio `1` (spread across `r` ~1e-6 ... 1e-8). The direct Green
+  function itself is l-independent; the factor `2` is not in `direct_G`.
+- The prefactor `2` is the structural ratio between the SPS full-spectrum
+  Green function (`sum_{n=1}^{2N+l} P_n^2 / (k_n(k-k_n))`, both `+k` and `-k*`
+  branches) and the S15 outgoing/Juelich representation. It is not a fitted
+  shape correction. The free `N=6` ratio is ~1.9 (finite-N), and the interacting
+  `N=50` ratio is `2.0000000007`.
+- The factor must be a documented module constant with tests (free density,
+  bound limit, l-independence), not a per-case calibration.
+
+### Optimization status (2026-10-30)
+
+A preallocated RK4 with V precomputed on a uniform fine grid is ~400x faster
+(0.05 s vs ~20 s per density), but it is not yet accurate: near `r=1e-6` the
+Coulomb `-Z/r` varies too rapidly for the midpoint V interpolation, giving a
+~5% error at a single `k` and relative L2 ~3.5 in the density. The validated
+slow version uses the exact V at every RK4 stage. Next optimization: a
+nonuniform grid clustered at the origin (or exact V at stage points), then
+re-validate against the `N=50` density before integrating.
+
 ## Confirmed
 
 (awaiting explicit user yes)
