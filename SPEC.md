@@ -189,26 +189,47 @@ and the loss comes from the Float64 eigenvector plus the intrinsic
 cancellation. B1 (DVR form or higher-precision normalization only) is ruled
 out.
 
-Remaining B variant: biorthogonal/left-eigenvector normalization. The idea is
-to pair each right eigenvector with its left partner and use the
-biorthogonal denominator (which may be `O(1)`) instead of the tiny self-norm.
-This is research-level (1-2 weeks), because the physical Green's function must
-be re-derived in the extended space and validated against the existing M1
-tests; the physical projection is still tiny, so success is not guaranteed.
+### B2 diagnostic (2026-10-30)
+
+The biorthogonal/left-eigenvector variant was tested on the `l=0` linearized
+QEP at `N=100` with the fixed `N=50` potential.
+
+- The standard left/right eigenvectors of the companion matrix are extremely
+  ill-conditioned (`cond(Y) ~ 9.1e13`, `cond(Z) ~ 2.0e14`). The standard
+  overlap `|z^T y|` is tiny (`~1.3e-13`), so a naive left/right pairing does
+  not help.
+- The correct QEP biorthogonal form uses the left QEP eigenvector `d_n` and
+  `ov_n = d_n^T (B + 2 lambda_n I) c_n`. For the smallest-norm state
+  (`lambda = 539.42`):
+  - `|norm| = 8.26e-16`, `|ov| = 1.24e-8`, `|d^T c| = 3.44e-6`,
+  - `|d^T c| / |ov| ~ 2.8e2`, versus the current `|c^T rho c| / |norm| ~ 8e9`.
+- Pointwise residue at the grid points, `r^2 c_j d_j / (kappa_j^2 ov)` versus
+  the current `r^2 c_j^2 / (kappa_j^2 norm)`:
+  - current max ~`6.0e12`, median ~`1.2e-4`,
+  - biorthogonal max ~`4.0e5`, median ~`5.1e-14`.
+
+The biorthogonal pairing reduces the amplification by about `1.5e7` (from
+`1e12` to `1e5`). This is a strong positive signal, but not a proof: the
+physical Green's function must be re-derived with the metric, boundary, and
+contour/Matsubara factors, and validated against the existing M1 tests. The
+pointwise `4e5` still implies a few digits of cancellation, so success is
+plausible but not guaranteed.
+
+Remaining B variant: B2 (QEP biorthogonal/left-eigenvector normalization).
 
 Options:
 
 - A. Accept the `N ~ 50` limitation and close M2.5 with this diagnosis (M2 as
   committed, plus the contour-panel note).
-- B. B2 (biorthogonal/left-eigenvector normalization) as a bounded research
-  spike. Expected 1-2 weeks; uncertain.
+- B. B2 as a bounded research spike (1-2 weeks). The diagnostic is promising;
+  start with a fixed-potential `l=0` prototype at `N=100`, compare against the
+  `N=50` result, and stop if the density is not positive and stable.
 - C. M1.5: S15-style direct regular/irregular Green function or a Siegert
   resolvent, which avoids the near-null eigenvector normalization entirely.
 - D. Proceed with M2.5b/M2.5c anyway (expected not to fix the root cause).
 
-Recommendation: B2 only if the user wants to keep the Siegert spectral sum;
-otherwise C is the more reliable reformulation. A remains valid given the
-`N ~ 50` practical range.
+Recommendation: B2 is now the preferred next step for keeping the Siegert
+spectral sum; C remains the fallback. A is still valid for closing M2.5.
 
 ## Confirmed
 
