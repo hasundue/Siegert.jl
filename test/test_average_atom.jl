@@ -2,14 +2,14 @@ using Test
 using Siegert
 using LinearAlgebra: I
 
-function eq6_matrix(aa::AverageAtomSPS)
-    a = aa.sps.box_size
-    l = aa.sps.angular_momentum
+function eq6_matrix(nsps::NormalizedSPS)
+    a = nsps.sps.box_size
+    l = nsps.sps.angular_momentum
     z = Siegert.reverse_bessel_zeros(l)
-    boundary = aa.dvr.basis[:, end]
-    C = aa.coefficients
-    rho = aa.sps.metric
-    k = aa.sps.momenta
+    boundary = nsps.dvr.basis[:, end]
+    C = nsps.coefficients
+    rho = nsps.sps.metric
+    k = nsps.sps.momenta
     M = zeros(ComplexF64, length(k), length(k))
     for i in eachindex(k), j in eachindex(k)
         Pi = a * sum(boundary .* C[:, i])
@@ -28,11 +28,11 @@ end
 
 function bound_density(states, r, mu, T)
     density = zeros(Float64, length(r))
-    for aa in states
-        l = aa.sps.angular_momentum
-        P = siegert_wavefunction(aa, r)
-        for i in eachindex(aa.sps.momenta)
-            k = aa.sps.momenta[i]
+    for nsps in states
+        l = nsps.sps.angular_momentum
+        P = siegert_wavefunction(nsps, r)
+        for i in eachindex(nsps.sps.momenta)
+            k = nsps.sps.momenta[i]
             if abs(real(k)) < 1e-8 && imag(k) > 0
                 epsilon = real(k^2) / 2
                 occupation = fermi_dirac(epsilon, mu, T)
@@ -53,15 +53,15 @@ relative_l2(a, b) = sqrt(sum((a .- b) .^ 2) / sum(b .^ 2))
     V = square_well(-112.5, 1.0)
 
     # Raw states stay unnormalized for scattering-only use; AA data lives in
-    # AverageAtomSPS, so a raw SPS cannot reach the wavefunction layer.
+    # NormalizedSPS, so a raw SPS cannot reach the wavefunction layer.
     raw = SPS(12, 0, V, 1.0)
     @test_throws ArgumentError siegert_wavefunction(raw)
 
     # Include all 2N+l states, hence also the complex resonant pairs.
     for l = 0:2
-        aa = AverageAtomSPS(SPS(12, l, V, 1.0))
-        @test !isempty(aa.normalizations)
-        @test maximum(abs.(eq6_matrix(aa) - I)) < 1e-8
+        nsps = NormalizedSPS(SPS(12, l, V, 1.0))
+        @test !isempty(nsps.normalizations)
+        @test maximum(abs.(eq6_matrix(nsps) - I)) < 1e-8
     end
 end
 
@@ -71,36 +71,37 @@ end
 @testset "Average atom: wavefunction evaluation" begin
     V = square_well(-112.5, 1.0)
     a = 1.0
-    states = [AverageAtomSPS(SPS(12, l, V, a)) for l = 0:2]
+    states = [NormalizedSPS(SPS(12, l, V, a)) for l = 0:2]
     common_r, _ = common_radial_grid(states)
 
-    for aa in states
-        P = siegert_wavefunction(aa)
-        expected = reshape(aa.sps.grid, :, 1) .* aa.coefficients ./ aa.dvr.coefficients
+    for nsps in states
+        P = siegert_wavefunction(nsps)
+        expected =
+            reshape(nsps.sps.grid, :, 1) .* nsps.coefficients ./ nsps.dvr.coefficients
         @test maximum(abs.(P - expected)) < 1e-10
-        @test P[:, 1] == siegert_wavefunction(aa, aa.sps.grid)[:, 1]
+        @test P[:, 1] == siegert_wavefunction(nsps, nsps.sps.grid)[:, 1]
 
-        P_common = siegert_wavefunction(aa, common_r)
-        @test size(P_common) == (length(common_r), length(aa.sps.momenta))
+        P_common = siegert_wavefunction(nsps, common_r)
+        @test size(P_common) == (length(common_r), length(nsps.sps.momenta))
         @test all(isfinite, P_common)
 
         # Boundary value used by Eq. (6): P(R) = a pi(1)^T c.
-        boundary = a * sum(aa.dvr.basis[:, end] .* aa.coefficients[:, 1])
-        @test isapprox(siegert_wavefunction(aa, [a])[1, 1], boundary; rtol = 1e-10)
+        boundary = a * sum(nsps.dvr.basis[:, end] .* nsps.coefficients[:, 1])
+        @test isapprox(siegert_wavefunction(nsps, [a])[1, 1], boundary; rtol = 1e-10)
     end
 end
 
 @testset "Average atom: Green's-function residue" begin
     V = square_well(-112.5, 1.0)
-    aa = AverageAtomSPS(SPS(20, 0, V, 1.0))
-    r = aa.sps.grid
-    P = siegert_wavefunction(aa)
-    index = findfirst(k -> abs(real(k)) < 1e-8 && imag(k) > 0, aa.sps.momenta)
+    nsps = NormalizedSPS(SPS(20, 0, V, 1.0))
+    r = nsps.sps.grid
+    P = siegert_wavefunction(nsps)
+    index = findfirst(k -> abs(real(k)) < 1e-8 && imag(k) > 0, nsps.sps.momenta)
     @test index !== nothing
-    k0 = aa.sps.momenta[index]
+    k0 = nsps.sps.momenta[index]
     residue = P[:, index] .^ 2 ./ k0
     delta = 1e-8
-    G = siegert_green(aa, k0 + delta; r = r)
+    G = siegert_green(nsps, k0 + delta; r = r)
     @test maximum(abs.(delta .* G .- residue)) / maximum(abs.(residue)) < 1e-6
 end
 
@@ -108,7 +109,7 @@ end
     R_values = (1.0, 2.0)
     N_values = (5, 6, 7)
     for N in N_values, R in R_values
-        states = [AverageAtomSPS(SPS(N, l, r -> 0.0, R)) for l = 0:5]
+        states = [NormalizedSPS(SPS(N, l, r -> 0.0, R)) for l = 0:5]
         r, weights = common_radial_grid(states)
         for k in (0.5, 1.0, 2.0)
             dos = siegert_dos(states, k; r = r, weights = weights)
@@ -125,7 +126,7 @@ end
     R = 1.0
     T = 0.1
     mu = -10.0
-    states = [AverageAtomSPS(SPS(20, l, V, R)) for l = 0:2]
+    states = [NormalizedSPS(SPS(20, l, V, R)) for l = 0:2]
     r, _ = common_radial_grid(states)
     density = siegert_density(states, mu, T)
     reference = bound_density(states, r, mu, T)
@@ -140,7 +141,7 @@ end
     V = r -> r >= R ? 0.0 : -20.0 * (1 - (r / R)^2)^2
     T = 1.0
     mu = 0.5
-    states = [AverageAtomSPS(SPS(30, l, V, R)) for l = 0:3]
+    states = [NormalizedSPS(SPS(30, l, V, R)) for l = 0:3]
     reference = siegert_density(states, mu, T)
 
     more_panels = siegert_density(states, mu, T; n_vert = 2, n_horiz = 40, n_return = 40)
@@ -172,7 +173,7 @@ end
 
     nbound = count(
         k -> abs(real(k)) < 1e-8 && imag(k) > 0,
-        reduce(vcat, (aa.sps.momenta for aa in result.states)),
+        reduce(vcat, (nsps.sps.momenta for nsps in result.states)),
     )
     @test nbound > 0
 end

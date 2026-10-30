@@ -30,10 +30,10 @@ struct Contour
 end
 
 """
-Average-atom Siegert state.
+Normalized Siegert state.
 
-Wraps a raw `SPS` and adds the data needed by the average-atom layer: the DVR
-basis, the normalized coefficients, and the raw normalization constants.
+Wraps a raw `SPS` and adds the normalized coefficients, raw normalization
+constants, and the DVR basis. The average-atom layer uses this type.
 
 Fields:
 - `sps`: Raw eigenproblem result
@@ -41,7 +41,7 @@ Fields:
 - `normalizations`: Raw normalization constants `N_n`
 - `dvr`: DVR basis used to build and evaluate the state
 """
-struct AverageAtomSPS <: AbstractSPS
+struct NormalizedSPS <: AbstractSPS
     sps::SPS
     coefficients::Matrix{ComplexF64}
     normalizations::Vector{ComplexF64}
@@ -49,15 +49,15 @@ struct AverageAtomSPS <: AbstractSPS
 end
 
 # Accessors shared with the raw SPS interface.
-momenta(aa::AverageAtomSPS) = momenta(aa.sps)
-coefficients(aa::AverageAtomSPS) = aa.coefficients
-grid(aa::AverageAtomSPS) = grid(aa.sps)
-box_size(aa::AverageAtomSPS) = box_size(aa.sps)
-angular_momentum(aa::AverageAtomSPS) = angular_momentum(aa.sps)
-hamiltonian(aa::AverageAtomSPS) = hamiltonian(aa.sps)
-metric(aa::AverageAtomSPS) = metric(aa.sps)
-boundary(aa::AverageAtomSPS) = boundary(aa.sps)
-dvr(aa::AverageAtomSPS) = aa.dvr
+momenta(nsps::NormalizedSPS) = momenta(nsps.sps)
+coefficients(nsps::NormalizedSPS) = nsps.coefficients
+grid(nsps::NormalizedSPS) = grid(nsps.sps)
+box_size(nsps::NormalizedSPS) = box_size(nsps.sps)
+angular_momentum(nsps::NormalizedSPS) = angular_momentum(nsps.sps)
+hamiltonian(nsps::NormalizedSPS) = hamiltonian(nsps.sps)
+metric(nsps::NormalizedSPS) = metric(nsps.sps)
+boundary(nsps::NormalizedSPS) = boundary(nsps.sps)
+dvr(nsps::NormalizedSPS) = nsps.dvr
 
 """
 Compute the SPS normalization constants and rescale the DVR coefficients.
@@ -68,7 +68,7 @@ wavefunction is `P_n(r) = r * Σ_i c_{i,n} π_i(x)`, so the volume term is
 
 Returns the raw normalization constants `N_n`.
 """
-function _normalize_average_atom!(
+function _normalize_coefficients!(
     coefficients::Matrix{ComplexF64},
     ks::Vector{ComplexF64},
     rho::Matrix{Float64},
@@ -99,18 +99,18 @@ function _normalize_average_atom!(
 end
 
 """
-    AverageAtomSPS(sps::SPS) -> AverageAtomSPS
-    AverageAtomSPS(sps::SPS, dvr::DVR) -> AverageAtomSPS
+    NormalizedSPS(sps::SPS) -> NormalizedSPS
+    NormalizedSPS(sps::SPS, dvr::DVR) -> NormalizedSPS
 
 Wrap a raw `SPS` and apply SS23 Eq. (6) / BT07 Eq. (37) normalization. The
 optional `dvr` avoids rebuilding the basis when it is already available.
 """
-function AverageAtomSPS(sps::SPS, basis::DVR)
+function NormalizedSPS(sps::SPS, basis::DVR)
     N = size(sps.coefficients, 1)
     size(basis.basis, 1) == N ||
         throw(DimensionMismatch("DVR basis does not match the SPS dimension"))
     coefficients = copy(sps.coefficients)
-    norm = _normalize_average_atom!(
+    norm = _normalize_coefficients!(
         coefficients,
         sps.momenta,
         sps.metric,
@@ -118,12 +118,12 @@ function AverageAtomSPS(sps::SPS, basis::DVR)
         sps.box_size,
         sps.angular_momentum,
     )
-    return AverageAtomSPS(sps, coefficients, norm, basis)
+    return NormalizedSPS(sps, coefficients, norm, basis)
 end
 
-function AverageAtomSPS(sps::SPS)
+function NormalizedSPS(sps::SPS)
     basis = DVR(size(sps.coefficients, 1), sps.angular_momentum)
-    return AverageAtomSPS(sps, basis)
+    return NormalizedSPS(sps, basis)
 end
 
 """
@@ -132,7 +132,7 @@ Result of a fixed-potential average-atom density calculation.
 Fields:
 - `density`: Electron density `n_e(r)` on `grid`
 - `chemical_potential`: Chemical potential `μ` in Hartree
-- `states`: Siegert states for each angular momentum
+- `states`: Normalized Siegert states for each angular momentum
 - `grid`: Common radial grid
 - `radius`: Ion-sphere radius `R`
 - `temperature`: Temperature in Hartree
@@ -142,7 +142,7 @@ Fields:
 struct AADensity
     density::Vector{Float64}
     chemical_potential::Float64
-    states::Vector{AverageAtomSPS}
+    states::Vector{NormalizedSPS}
     grid::Vector{Float64}
     radius::Float64
     temperature::Float64
@@ -154,17 +154,17 @@ end
 Return the `l = 0` Gauss-Radau grid and the weights for `∫_0^R f(r) dr`.
 
 The same grid is used for every angular momentum because the DVR grids depend
-on `l`. For an `AverageAtomSPS` with `l = 0` its own grid is the common grid.
+on `l`. For a `NormalizedSPS` with `l = 0` its own grid is the common grid.
 """
-function common_radial_grid(aa::AverageAtomSPS)
-    N = size(coefficients(aa), 1)
-    basis = angular_momentum(aa) == 0 ? dvr(aa) : DVR(N, 0)
-    r = x_to_r.(basis.grid, box_size(aa))
-    weights = (box_size(aa) / 2) .* basis.weights
+function common_radial_grid(nsps::NormalizedSPS)
+    N = size(coefficients(nsps), 1)
+    basis = angular_momentum(nsps) == 0 ? dvr(nsps) : DVR(N, 0)
+    r = x_to_r.(basis.grid, box_size(nsps))
+    weights = (box_size(nsps) / 2) .* basis.weights
     return r, weights
 end
 
-function common_radial_grid(states::AbstractVector{<:AverageAtomSPS})
+function common_radial_grid(states::AbstractVector{<:NormalizedSPS})
     isempty(states) && throw(ArgumentError("states must not be empty"))
     return common_radial_grid(first(states))
 end
@@ -176,55 +176,55 @@ volume_weights(r::AbstractVector{<:Real}, weights::AbstractVector{<:Real}) =
     (r .^ 2) .* weights
 
 """
-    siegert_wavefunction(aa::AverageAtomSPS) -> Matrix{ComplexF64}
+    siegert_wavefunction(nsps::NormalizedSPS) -> Matrix{ComplexF64}
 
-Evaluate all normalized radial Siegert states of `aa` on `grid(aa)`.
+Evaluate all normalized radial Siegert states of `nsps` on `grid(nsps)`.
 
 The returned matrix has one row per grid point and one column per state, with
 `P_{n,l}(r) = r Σ_i c_{i,n} π_i(x(r))`.
 """
-function siegert_wavefunction(aa::AverageAtomSPS)
-    return siegert_wavefunction(aa, grid(aa))
+function siegert_wavefunction(nsps::NormalizedSPS)
+    return siegert_wavefunction(nsps, grid(nsps))
 end
 
 siegert_wavefunction(sps::SPS) =
-    throw(ArgumentError("wrap the raw SPS in AverageAtomSPS first"))
+    throw(ArgumentError("wrap the raw SPS in NormalizedSPS first"))
 siegert_wavefunction(sps::SPS, r::AbstractVector) =
-    throw(ArgumentError("wrap the raw SPS in AverageAtomSPS first"))
+    throw(ArgumentError("wrap the raw SPS in NormalizedSPS first"))
 
 """
-    siegert_wavefunction(aa::AverageAtomSPS, r::AbstractVector) -> Matrix{ComplexF64}
+    siegert_wavefunction(nsps::NormalizedSPS, r::AbstractVector) -> Matrix{ComplexF64}
 
-Evaluate all normalized radial Siegert states of `aa` on the radii `r`.
+Evaluate all normalized radial Siegert states of `nsps` on the radii `r`.
 
 `r` must lie in `[0, R]`. The returned matrix has one row per radius and one
 column per state.
 """
-function siegert_wavefunction(aa::AverageAtomSPS, r::AbstractVector)
-    all(0 .<= r .<= box_size(aa)) || throw(DomainError(r, "radii must lie in [0, R]"))
-    l = angular_momentum(aa)
-    C = coefficients(aa)
+function siegert_wavefunction(nsps::NormalizedSPS, r::AbstractVector)
+    all(0 .<= r .<= box_size(nsps)) || throw(DomainError(r, "radii must lie in [0, R]"))
+    l = angular_momentum(nsps)
+    C = coefficients(nsps)
     N = size(C, 1)
-    x = 2 .* r ./ box_size(aa) .- 1
+    x = 2 .* r ./ box_size(nsps) .- 1
 
     w = jacobi_weight.(x, 0, 2l)
     h = jacobi_normsq.(0:(N-1), 0, 2l)
     P = jacobi_polynomials(x, 0, 2l, N)
     φ = sqrt.(reshape(w, 1, :) ./ reshape(h, :, 1)) .* P
-    π = transpose(dvr(aa).transformation) * φ
+    π = transpose(dvr(nsps).transformation) * φ
     values = transpose(C) * π
     return ComplexF64.(transpose(reshape(r, 1, :) .* values))
 end
 
 """
-    siegert_green(aa::AverageAtomSPS, k::Number; r=grid(aa)) -> Vector{ComplexF64}
+    siegert_green(nsps::NormalizedSPS, k::Number; r=grid(nsps)) -> Vector{ComplexF64}
 
 Diagonal partial-wave Green's function
 `G_l(r,r;k) = Σ_n P_{n,l}(r)^2 / [k_n (k - k_n)]` on the radii `r`.
 """
-function siegert_green(aa::AverageAtomSPS, k::Number; r = grid(aa))
-    P = siegert_wavefunction(aa, r)
-    return _green_diagonal(P, momenta(aa), k)
+function siegert_green(nsps::NormalizedSPS, k::Number; r = grid(nsps))
+    P = siegert_wavefunction(nsps, r)
+    return _green_diagonal(P, momenta(nsps), k)
 end
 
 function _green_diagonal(P::AbstractMatrix, ks::AbstractVector, k::Number)
@@ -233,7 +233,7 @@ function _green_diagonal(P::AbstractMatrix, ks::AbstractVector, k::Number)
 end
 
 """
-    siegert_dos(aa::AverageAtomSPS, k::Number; r, weights) -> Float64
+    siegert_dos(nsps::NormalizedSPS, k::Number; r, weights) -> Float64
 
 Partial density of states `χ_l(k) = -(1/π) Im ∫_0^R dr 2(2l+1) G_l(r,r;k)`.
 
@@ -241,30 +241,30 @@ When `r` and `weights` are omitted, the common `l = 0` grid is used. The
 weights must integrate over `dr`, not over `r² dr`.
 """
 function siegert_dos(
-    aa::AverageAtomSPS,
+    nsps::NormalizedSPS,
     k::Number;
     r::Union{Nothing,AbstractVector} = nothing,
     weights::Union{Nothing,AbstractVector} = nothing,
 )
     if r === nothing
-        r, default_weights = common_radial_grid(aa)
+        r, default_weights = common_radial_grid(nsps)
         weights === nothing && (weights = default_weights)
     end
     weights === nothing && throw(ArgumentError("weights must be given together with r"))
     length(r) == length(weights) ||
         throw(DimensionMismatch("r and weights must have the same length"))
-    G = siegert_green(aa, k; r = r)
-    return real(-(1 / π) * imag(2 * (2angular_momentum(aa) + 1) * sum(weights .* G)))
+    G = siegert_green(nsps, k; r = r)
+    return real(-(1 / π) * imag(2 * (2angular_momentum(nsps) + 1) * sum(weights .* G)))
 end
 
 """
-    siegert_dos(states::AbstractVector{<:AverageAtomSPS}, k::Number; r, weights)
+    siegert_dos(states::AbstractVector{<:NormalizedSPS}, k::Number; r, weights)
     -> Float64
 
 Total density of states, summed over the given partial waves.
 """
 function siegert_dos(
-    states::AbstractVector{<:AverageAtomSPS},
+    states::AbstractVector{<:NormalizedSPS},
     k::Number;
     r::Union{Nothing,AbstractVector} = nothing,
     weights::Union{Nothing,AbstractVector} = nothing,
@@ -274,7 +274,7 @@ function siegert_dos(
         weights === nothing && (weights = default_weights)
     end
     weights === nothing && throw(ArgumentError("weights must be given together with r"))
-    return sum(siegert_dos(aa, k; r = r, weights = weights) for aa in states)
+    return sum(siegert_dos(nsps, k; r = r, weights = weights) for nsps in states)
 end
 
 """
@@ -435,10 +435,10 @@ function contour_points(
     return points, measures
 end
 
-function _state_data(states::AbstractVector{<:AverageAtomSPS}, r::AbstractVector)
+function _state_data(states::AbstractVector{<:NormalizedSPS}, r::AbstractVector)
     return [
-        (momenta(aa), siegert_wavefunction(aa, r) .^ 2, angular_momentum(aa)) for
-        aa in states
+        (momenta(nsps), siegert_wavefunction(nsps, r) .^ 2, angular_momentum(nsps)) for
+        nsps in states
     ]
 end
 
@@ -534,7 +534,7 @@ Bound states with energy below `E_min` are added explicitly; the continuum is
 evaluated with the three-sided contour plus the enclosed Matsubara poles.
 """
 function siegert_density(
-    states::AbstractVector{<:AverageAtomSPS},
+    states::AbstractVector{<:NormalizedSPS},
     μ::Real,
     T::Real;
     E_min::Real = 0.0,
@@ -590,7 +590,7 @@ Solve `Z = 4π ∫_0^R r² n_e(r) dr` for the chemical potential by bisection wi
 an expanding bracket. The residual is `4π ∫ r² n_e dr - Z`.
 """
 function chemical_potential(
-    states::AbstractVector{<:AverageAtomSPS},
+    states::AbstractVector{<:NormalizedSPS},
     Z::Real,
     R::Real,
     T::Real;
@@ -631,7 +631,7 @@ function chemical_potential(
         return electron_number - Z, density, contour
     end
 
-    energies = reduce(vcat, (real.(momenta(aa) .^ 2 ./ 2) for aa in states))
+    energies = reduce(vcat, (real.(momenta(nsps) .^ 2 ./ 2) for nsps in states))
     lower = minimum(energies) - 10T
     upper = maximum(energies) + 10T
     f_lower, _, _ = evaluate(lower)
@@ -698,7 +698,7 @@ function fixed_potential_density(
     l_max >= 0 || throw(ArgumentError("l_max must be non-negative"))
     states = map(0:l_max) do l
         sps, basis = _solve_sps(N, l, V, R)
-        AverageAtomSPS(sps, basis)
+        NormalizedSPS(sps, basis)
     end
     mu, density, residual = chemical_potential(
         states,

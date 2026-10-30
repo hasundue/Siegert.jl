@@ -186,7 +186,7 @@ abstract type AbstractSPS end
 SPS (Siegert Pseudostate) solution data structure.
 
 This is the raw eigenproblem result. Average-atom data such as the DVR basis,
-normalized coefficients, and normalization constants live in `AverageAtomSPS`.
+normalized coefficients, and normalization constants live in `NormalizedSPS`.
 
 Fields:
 - `momenta`: Complex momenta k (Siegert eigenvalues)
@@ -232,7 +232,7 @@ Solve the SPS quadratic eigenvalue problem for Siegert states. [TON98, BT07]
 
 # Returns
 - `SPS`: raw Siegert pseudostate solution containing the `2N + l` eigenvalues
-  and eigenvectors. Wrap it in `AverageAtomSPS` before using the
+  and eigenvectors. Wrap it in `NormalizedSPS` before using the
   average-atom layer.
 
 # Example

@@ -10,7 +10,7 @@ using LinearAlgebra: Diagonal, eigen, I
 using SpecialFunctions: loggamma
 
 export AbstractSPS
-export AverageAtomSPS
+export NormalizedSPS
 export DVR
 export SPS
 export square_well
