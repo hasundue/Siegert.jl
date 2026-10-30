@@ -26,6 +26,9 @@ function eq6_matrix(nsps::NormalizedSPS)
     return M
 end
 
+# Test-only reference for the empty-continuum limit. This intentionally mirrors
+# `_add_bound_density!` (same filter and spatial formula), so it is a plumbing
+# and regression check, not an independent validation of the bound formula.
 function bound_density(states, r, mu, T)
     density = zeros(Float64, length(r))
     for nsps in states
