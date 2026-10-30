@@ -54,8 +54,12 @@ acceleration in M2.
 
 Convergence requires
 
-- `max_r |V_eff,next(r) - V_eff(r)| < 1e-8` Ha, and
+- `max_r |V_eff,next(r) - V_eff(r)| < 1e-4` Ha, and
 - `|4π ∫_0^R r^2 n_e dr - Z| / Z < 1e-8`.
+
+The self-consistency threshold is `1e-4` Ha because the M1 contour + Matsubara
+density carries a Float64 noise floor of ~1e-5 relative to `max |n_e|`; see
+`## Blocker`. The boundary and neutrality thresholds stay at `1e-8`.
 
 If convergence is not reached, return a result with `converged = false` and
 emit a warning. The result must contain the final density, potential,
@@ -97,7 +101,7 @@ consistently with the finite cell, stop and report; do not fit a correction.
 
 New public names:
 
-- `average_atom(Z, A, rho_m, T; N=150, l_max=10, xc=nothing, mixing=0.4,
+- `average_atom(Z, A, rho_m, T; N=50, l_max=10, xc=nothing, mixing=0.4,
   max_iterations=100, free_electron_subtraction=false, ...) ->
   AverageAtomResult`
 - `AverageAtomResult`: fields
@@ -140,7 +144,7 @@ conversion test.
 
 - [ ] With `xc = nothing`, a test case (for example `Z = 5`, `A = 10`,
       `rho_m = 10`, `T = 0.2` eV) converges with `converged = true`,
-      `self_consistency_residual < 1e-8`, and
+      `self_consistency_residual < 1e-4`, and
       `abs(neutrality_residual) / Z < 1e-8`.
       verify: `just test average_atom`
 
@@ -157,11 +161,13 @@ conversion test.
       `R_Bohr` and `T_Ha` gives the same density and `μ`.
       verify: `just test average_atom`
 
-- [ ] `N = 50, 100, 150` on a self-consistent test case gives stable `μ` and
-      density. Report the actual numbers in the test output. Initial thresholds:
-      `max |Δμ| < 1e-4` eV and density relative `L2` change `< 1e-2`. If these
-      are too tight for a legitimate case, stop and report rather than loosen
-      silently.
+- [ ] `N = 30, 40, 50` on a self-consistent test case gives stable `μ` and
+      density. Report the actual numbers in the test output. Thresholds:
+      `max |Δμ| < 1e-2` eV and density relative `L2` change `< 1e-2`. The
+      `μ` threshold is set by the M1 density noise floor (~1e-4 Ha = 2.7e-3
+      eV) and the physical target of ~0.01% in `μ`; it is not a 1e-8 target.
+      The fixed-potential `N = 50, 100, 150` sweep remains covered by the M1
+      basis-convergence test.
       verify: `just test average_atom`
 
 - [ ] Free-electron subtraction at fixed potential agrees with the
@@ -220,6 +226,22 @@ conversion test.
 - 2026-10-29 -- Default mixing is 0.4, maximum iterations 100, convergence
   `max |ΔV_eff| < 1e-8` Ha and relative neutrality `< 1e-8`. No Anderson
   mixing in M2.
+- 2026-10-30 -- The self-consistency threshold is relaxed from `1e-8` to
+  `1e-4` Ha (decision A). The M1 density layer's Float64 noise floor is
+  ~1e-5, so `1e-8` is not attainable without changing the M1 density
+  representation. The boundary `V_eff(R) = 0` within `1e-8` Ha and the
+  relative neutrality `< 1e-8` stay unchanged.
+- 2026-10-30 -- The `1e-8` target had no physical basis; it was a numerical
+  convention inherited from the M1 tests. Physically meaningful targets are
+  `μ` ~1e-3 eV (S15 uses 0.01%), density relative L2 ~1e-3, and pressure
+  ~1%. The M1.5 spike pass criteria are therefore: no divergence, a
+  perturbation response of order the perturbation (not amplified), and
+  N-stability at the 1e-3 level, not `1e-8`.
+- 2026-10-30 -- Decision F1: `average_atom` defaults to `N = 50`; the
+  self-consistent N sweep uses `N = 30, 40, 50` with `max |Δμ| < 1e-2` eV.
+  The fixed-potential `N = 50, 100, 150` convergence stays in the M1 test.
+  High-precision eigensolves (B2) are deprioritized; the paper-aligned
+  fallback is an M1.5 direct-G or resolvent reformulation.
 - 2026-10-29 -- Initial `V_eff` is `-Z/r + Z/R` inside the cell, zero outside,
   so `V_eff(R) = 0` from the start.
 - 2026-10-29 -- Free-electron subtraction is validated at fixed potential
@@ -239,6 +261,170 @@ conversion test.
   Free-electron subtraction changes the angular-momentum representation, not
   the contour formula.
 
+## Blocker
+
+2026-10-30 — M2a does not reach the required `1e-8` self-consistency. The M1
+density layer is not a smooth function of `V_eff` at that scale, so no mixing,
+iteration count, or acceleration can drive `max |ΔV_eff|` below ~1e-5. This is
+the spec stop condition "self-consistent loop does not converge for the test
+case with mixing in 0.3-0.5".
+
+### What was tried
+
+- Prototype SCF under `scratch/` using the M1 `fixed_potential_density` layer,
+  a spectral cumulative Hartree integral (validated against an analytic density
+  to ~3e-13), and a DVR cardinal interpolation of the smooth part of `V_eff`.
+- Case `Z=5, A=10, rho_m=10, T=0.2` eV (`R=1.3882` Bohr), `N=40`, `l_max=4`,
+  mixing 0.1/0.2/0.3/0.4, `max_iterations=300`: the residual stalls at
+  3e-6 ... 1e-5 and oscillates. It never reaches `1e-8`.
+- `l_max = 0, 1, 2` alone still floors at 2.5e-7, 5.8e-6, 1.4e-5.
+- Milder cases (`Z=1,2`, `A=1,4`, `rho_m=10`, `T=0.2` eV) floor at
+  4e-5 ... 4e-4.
+- Larger `N` hits `ArgumentError("could not bracket the chemical potential")`
+  in the M1 solver (`N=60`, `l_max=0`).
+
+### Cause
+
+The contour + Matsubara density sums over all `2N+l` Siegert pseudostates.
+The high-|k| pseudostates have normalization constants `|N_n|` as small as
+1e-11 (near-null SPS norms), so their normalized wavefunctions are huge
+(`|P|^2` up to ~1e11 at `r ~ R`) and cancel catastrophically. The resulting
+density carries a systematic Float64 error of ~1e-5 relative to `max |n_e|`.
+That error is invisible in the M1 contour-invariance tests because the states
+are fixed there, but it changes when `V_eff` changes.
+
+Evidence at the `N=40`, `l_max=4` near-fixed point:
+
+- Perturbing `V_eff` by `1e-8` changes `max |n_e|` by 4.8e-4 (relative 7.7e-6)
+  and `μ` by 3e-5, independent of the perturbation size down to `1e-10`.
+- Restricting the sum to `|k| <= 3` removes the noise (1.4e-8), but `|k| <= 3`
+  changes the density value by 4% and `|k| <= 5` by 33%, so the high-k states
+  are physically required, not negligible.
+- The bound-state part is smooth (6e-9 for a `1e-8` perturbation); the contour
+  and Matsubara parts carry the noise.
+- Tighter `mu_tolerance` (`1e-12`, `1e-14`) does not help.
+- Freezing the contour (`E_max`, `E_I`) does not help.
+- LAPACK balancing before `geev` reduces the noise only from 4.8e-4 to 2.8e-4.
+- Refining the contour quadrature (`n_horiz = n_return = 80`) does not help.
+
+### Options (one decision needed before continuing)
+
+A. Relax the M2 acceptance criteria to what the M1 layer can deliver, e.g.
+   `max |ΔV_eff| < 1e-5` Ha and `|V_eff(R)| < 1e-5` Ha, while keeping the
+   neutrality tolerance at `1e-8` relative (which is already met, ~1e-12).
+   This changes the acceptance criteria in this SPEC.
+
+### Resolution
+
+2026-10-30 -- user chose option A. The self-consistency threshold becomes
+`1e-4` Ha; the `V_eff(R) = 0` and neutrality thresholds stay at `1e-8`.
+Work continues with M2a/M2b under the relaxed self-consistency threshold.
+### 2026-10-30 update -- N-dependence also blocks criterion 5
+
+After implementing M2a/M2b, the M1 density noise was measured against `N`. It
+grows with `N`, so the self-consistent loop is only feasible for small bases:
+
+- `Z=5, A=10, rho_m=10, T=0.2` eV, `l_max=4`, `mixing=0.4`, 100 iterations:
+  - `N=40,50`: converge (`residV` ~ 4e-5 ... 1e-4).
+  - `N=60`: converges with `l_max=4` (41 iterations) but not with
+    `l_max=6,10`.
+  - `N=70,80`: do not converge; `residV` stays ~5e-4 ... 3e-2.
+  - `N=100,150`: wander and often throw `could not bracket the chemical
+    potential`. `N=100, l_max=0` even ran to `μ = 362` Ha.
+- `Z=1, A=4, rho_m=10, T=0.2` eV, `l_max=4`: `N=50` converges; `N=100`
+  throws; `N=150` does not converge.
+- `N=50, l_max=10` (the SPEC default `l_max`) converges in 20 iterations, so
+  the spec's example case is feasible at `N=50`.
+- The default `average_atom` value `N=150` therefore does not converge.
+
+Self-consistent `N = 30, 40, 50` (Z=5, `l_max=10`) gives:
+
+- density relative L2 changes: 2.8e-5 and 1.6e-4 (threshold 1e-2: pass),
+- `max |Δμ| = 6.7e-3` eV (threshold `1e-4` eV: fails).
+
+So criterion 5 as written (self-consistent `N=50,100,150`, `max|Δμ| < 1e-4`
+eV) cannot be met by the current M1 layer, regardless of the self-consistency
+tolerance change. The `μ` threshold is ~67x below the observed M1 noise floor
+(~1e-4 Ha = 2.7e-3 eV).
+
+Options (need one decision):
+
+- F1 (recommended): Change the `average_atom` default `N` to 50. Make
+  criterion 5 a self-consistent sweep over feasible `N = 30, 40, 50` and
+  relax `max|Δμ|` to `1e-2` eV (density L2 threshold stays `1e-2`). Report
+  the actual numbers in the test output.
+- F2: Keep criterion 5's `N=50,100,150` but verify it on the fixed-potential
+  M1 layer (already passing), and rely on criterion 1 for the self-consistent
+  test. Change the `average_atom` default `N` to 50.
+- F3: Fix the M1 density precision (option B) or implement M2c first
+  (option C), then keep criterion 5 as originally written
+  (`N=50,100,150`, self-consistent). More work, and M2c may not address the
+  high-`k` conditioning.
+
+### Resolution and revised spike criteria
+
+2026-10-30 -- user chose F1. The `average_atom` default becomes `N = 50`, and
+criterion 5 uses `N = 30, 40, 50` with `max|Δμ| < 1e-2` eV. The user also
+approved replacing the unfounded `1e-8` spike target with physical criteria:
+
+- no divergence or wandering to a spurious solution,
+- density response to a `δV` perturbation is `O(δ)` (not amplified by the
+  near-null states),
+- `N = 50, 100, 150` agree at the physically meaningful level (`μ` ~1e-3 eV,
+  density relative L2 ~1e-3).
+
+B2 (high-precision eigensolve) is deprioritized. The next M1-level
+investigation, if needed, is the S15-style direct Green function or a Siegert
+resolvent formulation.
+
+B. Fix the M1 density precision first (outside the current M2 scope): evaluate
+   the contour/Matsubara sums with higher-precision accumulation (BigFloat or
+   double-double) to recover the cancelled digits, or reformulate the density
+   through the resolvent instead of the eigen-sum.
+
+C. Implement M2c free-electron subtraction first and re-measure. The
+   subtracted Green function may be much better conditioned; this is not
+   guaranteed and would reorder M2a/M2c.
+
+D. Change the density representation more broadly (not recommended silently).
+
+### Current tree state
+
+No tracked source has been modified. `scratch/` contains only the untracked
+diagnostic scripts used above; it can be deleted or kept by the user.
+
+## Implementation status
+
+2026-10-30 -- M2a/M2b/M2c are implemented in `src/average_atom.jl` and tested
+in `test/test_average_atom.jl`. Evidence from `nix develop`:
+
+- Criterion 1: `average_atom(5, 10, 10, 0.2; N=50, l_max=10)` gives
+  `converged = true`, 20 iterations, `self_consistency_residual = 9.89e-5`,
+  and `|neutrality_residual|/Z = 3.4e-12`.
+- Criterion 2: `V_eff(R) = -3.05e-11` Ha and `minimum(density) = 0.27`.
+- Criterion 3: a constant `V_xc` leaves the result unchanged to `< 1e-3`; a
+  linear `V_xc` changes `V_eff` (max ~0.11 Ha), keeps `V_eff(R) < 1e-8`, and
+  still converges.
+- Criterion 4: the unit round trip `average_atom` vs `_average_atom_bohr`
+  matches to machine precision; the constants are tested directly.
+- Criterion 5: self-consistent `N = 30, 40, 50` gives
+  `max |Δμ| = 6.67e-3` eV and density relative L2 changes 2.8e-5 and 1.6e-4
+  (thresholds 1e-2 and 1e-2).
+- Criterion 6: at fixed `V = -Z/r + Z/R`, `N = 40`, subtraction at
+  `l_max = 10` vs no-subtraction at `l_max = 20` gives relative L2 1.16e-7;
+  on/off at `l_max = 20` gives 1.16e-7 (threshold 1e-6).
+- Criterion 7: `just test` passes.
+- Criterion 8: `treefmt --no-cache --fail-on-change src test` reports
+  0 changed files.
+
+Known limitation: `free_electron_subtraction = true` in the self-consistent
+loop converges for `l_max = 4, 6` but not at `l_max = 10` for `Z = 5`
+(`residV ~ 1e-3` after 100 iterations). The fixed-potential criterion passes;
+the flag is off by default.
+
 ## Confirmed
 
 2026-10-29 -- user: "yes"
+
+2026-10-30 -- user approved the physical tolerances (1e-3 level, no 1e-8)
+and asked to commit the M2 implementation with the documented limitations.

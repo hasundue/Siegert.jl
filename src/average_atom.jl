@@ -10,6 +10,14 @@
 #   scattering theory: Nonzero angular momenta in the one-channel case,"
 #   Phys. Rev. A 75, 062704 (2007). doi:10.1103/PhysRevA.75.062704 [BT07]
 
+# Physical constants and unit conversions for the public API. Internal
+# calculations use Hartree and Bohr; the public `average_atom` accepts eV,
+# g/cm^3, and atomic mass units.
+const HARTREE_TO_EV = 27.211386245988
+const ATOMIC_MASS_UNIT_KG = 1.66053906660e-27
+const BOHR_RADIUS_M = 5.29177210903e-11
+const GRAM_PER_CM3_TO_KG_PER_M3 = 1000.0
+
 
 """
 Parameters of the upper-half-plane energy contour used by SS23 Eq. (13).
@@ -491,6 +499,57 @@ function _add_matsubara_density!(density, data, r2, contour, T)
     return density
 end
 
+# Spherical Bessel and outgoing spherical Hankel functions, used by the
+# analytic free-electron reference of S15 Eq. (14).
+_spherical_j(l::Integer, z) = sqrt.(π ./ (2 .* z)) .* besselj.(l + 1 / 2, z)
+_spherical_h1(l::Integer, z) = sqrt.(π ./ (2 .* z)) .* besselh.(l + 1 / 2, 1, z)
+
+"""
+    free_electron_density(μ, T) -> Float64
+
+Uniform free-electron density `(1/π²) ∫_0^∞ k² f(k²/2) dk` in bohr^-3.
+"""
+function free_electron_density(μ::Real, T::Real)
+    T > 0 || throw(ArgumentError("T must be positive"))
+    k_max = sqrt(2 * (max(0.0, Float64(μ)) + 60T))
+    nodes, weights = gauss_legendre4()
+    panels = 200
+    integral = 0.0
+    for panel = 1:panels
+        a = (panel - 1) / panels * k_max
+        b = panel / panels * k_max
+        half = (b - a) / 2
+        center = (a + b) / 2
+        for q = 1:4
+            k = center + half * nodes[q]
+            integral += half * weights[q] * k^2 * fermi_dirac(k^2 / 2, μ, T)
+        end
+    end
+    return integral / π^2
+end
+
+# Partial free-electron density from the analytic free Green function
+# `G_l^0 = -2 i k r² j_l(kr) h^+_l(kr)` (S15 Eq. 14). The factor 2 comes from
+# the spin degeneracy already present in `2(2l + 1)`.
+function _free_partial_density(r, μ, T, l, contour, n_vert, n_horiz, n_return)
+    points, measures = contour_points(contour; n_vert, n_horiz, n_return)
+    factor = 2 * (2l + 1) / (4π)
+    density = zeros(Float64, length(r))
+    accumulator = zeros(ComplexF64, length(r))
+    for (ε, dε) in zip(points, measures)
+        k = sqrt(2ε)
+        G = -2im * k .* _spherical_j(l, k .* r) .* _spherical_h1(l, k .* r)
+        accumulator .+= fermi_dirac(ε, μ, T) * dε * factor .* G
+    end
+    density .+= (1 / π) .* imag.(accumulator)
+    for z in contour.energies
+        k = sqrt(2z)
+        G = -2im * k .* _spherical_j(l, k .* r) .* _spherical_h1(l, k .* r)
+        density .+= 2T * real.(factor .* G)
+    end
+    return density
+end
+
 function _density_and_contour(
     data,
     r::AbstractVector,
@@ -503,6 +562,7 @@ function _density_and_contour(
     n_horiz::Integer = 20,
     n_return::Integer = 20,
     bound_tolerance::Real = 1e-8,
+    free_electron_subtraction::Bool = false,
 )
     all(>(0), r) || throw(DomainError(r, "radii must be positive"))
     contour = contour_parameters(μ, T; E_min = E_min, E_max = E_max, E_I = E_I)
@@ -522,6 +582,14 @@ function _density_and_contour(
         n_return = n_return,
     )
     _add_matsubara_density!(density, data, r2, contour, T)
+    if free_electron_subtraction
+        l_values = sort(unique(l for (_, _, l) in data))
+        density .+= free_electron_density(μ, T)
+        for l in l_values
+            density .-=
+                _free_partial_density(r, μ, T, l, contour, n_vert, n_horiz, n_return)
+        end
+    end
     return density, contour
 end
 
@@ -547,6 +615,7 @@ function siegert_density(
     n_horiz::Integer = 20,
     n_return::Integer = 20,
     bound_tolerance::Real = 1e-8,
+    free_electron_subtraction::Bool = false,
 )
     if r === nothing
         r, default_weights = common_radial_grid(states)
@@ -579,6 +648,7 @@ function siegert_density(
         n_horiz = n_horiz,
         n_return = n_return,
         bound_tolerance = bound_tolerance,
+        free_electron_subtraction = free_electron_subtraction,
     )
     return density
 end
@@ -603,6 +673,8 @@ function chemical_potential(
     bound_tolerance::Real = 1e-8,
     mu_tolerance::Real = 1e-10,
     max_iterations::Integer = 100,
+    mu_guess::Union{Nothing,Real} = nothing,
+    free_electron_subtraction::Bool = false,
 )
     isempty(states) && throw(ArgumentError("states must not be empty"))
     Z > 0 || throw(ArgumentError("Z must be positive"))
@@ -626,34 +698,49 @@ function chemical_potential(
             n_horiz = n_horiz,
             n_return = n_return,
             bound_tolerance = bound_tolerance,
+            free_electron_subtraction = free_electron_subtraction,
         )
         electron_number = 4π * sum(volume .* density)
         return electron_number - Z, density, contour
     end
 
     energies = reduce(vcat, (real.(momenta(nsps) .^ 2 ./ 2) for nsps in states))
-    lower = minimum(energies) - 10T
-    upper = maximum(energies) + 10T
+    if mu_guess === nothing
+        lower = minimum(energies) - 10T
+        upper = maximum(energies) + 10T
+    else
+        # Warm start: keep the bracket near the previous chemical potential.
+        # The full spectrum's maximum energy can be far above the physical μ;
+        # evaluating the contour there may reach the top of the pseudospectrum
+        # and return garbage.
+        width = max(0.1, 5T, 0.01 * abs(mu_guess))
+        lower = Float64(mu_guess) - width
+        upper = Float64(mu_guess) + width
+    end
     f_lower, _, _ = evaluate(lower)
     f_upper, _, _ = evaluate(upper)
 
     scale = max(1.0, upper - lower)
     iterations = 0
-    while f_lower > 0 && iterations < max_iterations
+    while (!isfinite(f_lower) || f_lower > 0) && iterations < max_iterations
         lower -= scale
         scale *= 2
         f_lower, _, _ = evaluate(lower)
         iterations += 1
     end
     scale = max(1.0, upper - lower)
-    while f_upper < 0 && iterations < max_iterations
+    while (!isfinite(f_upper) || f_upper < 0) && iterations < max_iterations
         upper += scale
         scale *= 2
         f_upper, _, _ = evaluate(upper)
         iterations += 1
     end
-    (f_lower <= 0 && f_upper >= 0) ||
-        throw(ArgumentError("could not bracket the chemical potential"))
+    (isfinite(f_lower) && isfinite(f_upper) && f_lower <= 0 && f_upper >= 0) || throw(
+        ArgumentError(
+            "could not bracket the chemical potential (mu_guess = $mu_guess, " *
+            "lower = $lower, f_lower = $f_lower, upper = $upper, f_upper = $f_upper)",
+        ),
+    )
 
     for _ = 1:max_iterations
         midpoint = (lower + upper) / 2
@@ -676,6 +763,11 @@ end
 
 Compute the fixed-potential M1 average-atom density for `V`, nuclear charge
 `Z`, ion-sphere radius `R`, and temperature `T` in Hartree.
+
+With `free_electron_subtraction = true` each partial wave is evaluated as
+`n_l - n_l^free` and the analytic free density is added back (S15
+Eqs. (13)/(14)); the total density is unchanged but the `l` sum converges
+faster.
 """
 function fixed_potential_density(
     V::Function,
@@ -693,6 +785,8 @@ function fixed_potential_density(
     bound_tolerance::Real = 1e-8,
     mu_tolerance::Real = 1e-10,
     max_iterations::Integer = 100,
+    mu_guess::Union{Nothing,Real} = nothing,
+    free_electron_subtraction::Bool = false,
 )
     N > 0 || throw(ArgumentError("N must be positive"))
     l_max >= 0 || throw(ArgumentError("l_max must be non-negative"))
@@ -714,8 +808,325 @@ function fixed_potential_density(
         bound_tolerance = bound_tolerance,
         mu_tolerance = mu_tolerance,
         max_iterations = max_iterations,
+        mu_guess = mu_guess,
+        free_electron_subtraction = free_electron_subtraction,
     )
     grid, _ = common_radial_grid(states)
     contour = contour_parameters(mu, T; E_min = E_min, E_max = E_max, E_I = E_I)
     return AADensity(density, mu, states, grid, Float64(R), Float64(T), residual, contour)
+end
+
+"""
+Ion-sphere radius in Bohr for mass number `A` (in atomic mass units) and mass
+density `rho_m` (in g/cm^3).
+"""
+function ion_sphere_radius_bohr(A::Real, rho_m::Real)
+    A > 0 || throw(ArgumentError("A must be positive"))
+    rho_m > 0 || throw(ArgumentError("rho_m must be positive"))
+    rho_kg_m3 = rho_m * GRAM_PER_CM3_TO_KG_PER_M3
+    R_m = (3 * A * ATOMIC_MASS_UNIT_KG / (4π * rho_kg_m3))^(1 / 3)
+    return R_m / BOHR_RADIUS_M
+end
+
+# Precompute what the DVR cardinal interpolation needs on the l = 0 grid.
+function _dvr_interpolation_setup(dvr::DVR)
+    N = length(dvr.grid)
+    norms = [jacobi_normsq(n, 0, 0) for n = 0:(N-1)]
+    return (dvr = dvr, norms = norms, transform = transpose(dvr.transformation))
+end
+
+"""
+Evaluate the DVR cardinal interpolant of `values` at a single radius `r`.
+
+The interpolant is a polynomial of degree `N - 1` through the l = 0
+Gauss-Radau nodes. `values` holds a smooth radial function (the smooth part of
+the effective potential), so this is spectrally accurate in the cell.
+"""
+function _interpolate_dvr(values::AbstractVector, setup, r::Real, R::Real)
+    N = length(setup.norms)
+    x = 2r / R - 1
+    w = jacobi_weight(x, 0, 0)
+    P = vec(jacobi_polynomials([x], 0, 0, N))
+    φ = (sqrt(w) ./ sqrt.(setup.norms)) .* P
+    π = setup.transform * φ
+    coefficients = setup.dvr.coefficients .* values
+    return sum(coefficients .* π)
+end
+
+# Antiderivative of the l = 0 FBR basis at a single point:
+# `I[n] = ∫_{-1}^{x} φ_n(t) dt`, using the Legendre identity
+# ∫ P_n = (P_{n+1} - P_{n-1}) / (2n + 1).
+function _antiderivative_row(x::Real, N::Integer)
+    P = jacobi_polynomials([x], 0, 0, N + 2)
+    I = Vector{Float64}(undef, N)
+    I[1] = (x + 1) / sqrt(2.0)
+    for n = 1:(N-1)
+        I[n+1] = (P[n+2, 1] - P[n, 1]) / (2n + 1) / sqrt(2 / (2n + 1))
+    end
+    return I
+end
+
+"""
+Return `c(r) = ∫_0^r f(r') dr'` for values `f` sampled on the l = 0 grid.
+
+The integration is performed on the polynomial interpolant in the FBR basis,
+so for a smooth density it is accurate to roundoff.
+"""
+function _cumulative_integral(values::AbstractVector, dvr::DVR, R::Real)
+    N = length(dvr.grid)
+    coefficients = dvr.fbr_basis * (dvr.weights .* values)
+    return function (r::Real)
+        x = 2r / R - 1
+        return (R / 2) * sum(_antiderivative_row(x, N) .* coefficients)
+    end
+end
+
+"""
+Hartree potential `V_H(r) = 4π[1/r ∫_0^r r'² n_e dr' + ∫_r^R r' n_e dr']`.
+
+`density` is sampled on `x_to_r.(dvr.grid, R)`, the l = 0 common grid.
+"""
+function _hartree_potential(density::AbstractVector, dvr::DVR, R::Real)
+    r = x_to_r.(dvr.grid, R)
+    g = 4π .* (r .^ 2) .* density
+    h = 4π .* r .* density
+    cumulative_g = _cumulative_integral(g, dvr, R)
+    cumulative_h = _cumulative_integral(h, dvr, R)
+    total_h = cumulative_h(R)
+    return [
+        cumulative_g(r[i]) / r[i] + (total_h - cumulative_h(r[i])) for i in eachindex(r)
+    ]
+end
+
+function _effective_potential(W::AbstractVector, setup, R::Real, Z::Real)
+    return function (r::Real)
+        r >= R && return 0.0
+        return -Z / r + _interpolate_dvr(W, setup, r, R)
+    end
+end
+
+"""
+Self-consistent average-atom result.
+
+Fields:
+- `density`: Electron density `n_e(r)` in bohr^-3 on `grid`
+- `potential`: Final effective potential `V_eff(r)` in Hartree on `grid`
+- `chemical_potential_eV`: Chemical potential `μ` in eV
+- `radius_bohr`: Ion-sphere radius `R` in Bohr
+- `temperature_eV`: Temperature in eV
+- `neutrality_residual`: `4π ∫_0^R r² n_e dr - Z`
+- `self_consistency_residual`: `max_r |V_eff,next(r) - V_eff(r)|` in Hartree,
+  where `V_eff,next` is the mixed update of SPEC step 5
+- `iterations`: Number of self-consistent iterations performed
+- `converged`: Whether both convergence criteria were met
+- `states`: Normalized Siegert states for each angular momentum
+- `grid`: Common radial grid in Bohr (the l = 0 Gauss-Radau grid)
+- `contour`: Contour parameters used for the final density
+"""
+struct AverageAtomResult
+    density::Vector{Float64}
+    potential::Vector{Float64}
+    chemical_potential_eV::Float64
+    radius_bohr::Float64
+    temperature_eV::Float64
+    neutrality_residual::Float64
+    self_consistency_residual::Float64
+    iterations::Int
+    converged::Bool
+    states::Vector{NormalizedSPS}
+    grid::Vector{Float64}
+    contour::Contour
+end
+
+"""
+Internal self-consistent driver with `R` in Bohr and `T` in Hartree.
+
+See [`average_atom`](@ref) for the public interface and units.
+"""
+function _average_atom_bohr(
+    Z::Real,
+    R::Real,
+    T::Real;
+    N::Integer = 50,
+    l_max::Integer = 10,
+    xc = nothing,
+    mixing::Real = 0.4,
+    max_iterations::Integer = 100,
+    scf_tolerance::Real = 1e-4,
+    free_electron_subtraction::Bool = false,
+    E_min::Real = 0.0,
+    E_max::Union{Nothing,Real} = nothing,
+    E_I::Union{Nothing,Real} = nothing,
+    n_vert::Integer = 1,
+    n_horiz::Integer = 20,
+    n_return::Integer = 20,
+    bound_tolerance::Real = 1e-8,
+    mu_tolerance::Real = 1e-10,
+)
+    Z > 0 || throw(ArgumentError("Z must be positive"))
+    R > 0 || throw(ArgumentError("R must be positive"))
+    T > 0 || throw(ArgumentError("T must be positive"))
+    N > 0 || throw(ArgumentError("N must be positive"))
+    l_max >= 0 || throw(ArgumentError("l_max must be non-negative"))
+    0 < mixing <= 1 || throw(ArgumentError("mixing must lie in (0, 1]"))
+    max_iterations > 0 || throw(ArgumentError("max_iterations must be positive"))
+    scf_tolerance > 0 || throw(ArgumentError("scf_tolerance must be positive"))
+
+    dvr0 = DVR(N, 0)
+    setup = _dvr_interpolation_setup(dvr0)
+    r = x_to_r.(dvr0.grid, R)
+    W = fill(Float64(Z) / R, length(r))
+    mu_guess = nothing
+    aa = nothing
+    iterations = 0
+    converged = false
+    resid_v = Inf
+    resid_n = Inf
+    W_used = W
+
+    for it = 1:max_iterations
+        iterations = it
+        W_used = W
+        V = _effective_potential(W_used, setup, R, Z)
+        aa = fixed_potential_density(
+            V,
+            Z,
+            R,
+            T;
+            N = N,
+            l_max = l_max,
+            E_min = E_min,
+            E_max = E_max,
+            E_I = E_I,
+            n_vert = n_vert,
+            n_horiz = n_horiz,
+            n_return = n_return,
+            bound_tolerance = bound_tolerance,
+            mu_tolerance = mu_tolerance,
+            mu_guess = mu_guess,
+            free_electron_subtraction = free_electron_subtraction,
+        )
+        mu_guess = aa.chemical_potential
+        V_H = _hartree_potential(aa.density, dvr0, R)
+        xc_values = xc === nothing ? zeros(length(r)) : xc(aa.density, r)
+        length(xc_values) == length(r) ||
+            throw(DimensionMismatch("xc must return one value per grid point"))
+        xc_values = Float64.(xc_values)
+        xc_at_R = xc_values[end]
+        W_new = V_H .+ xc_values .- xc_at_R
+        delta = maximum(abs.(W_new .- W_used))
+        resid_v = mixing * delta
+        resid_n = abs(aa.neutrality_residual) / Z
+        if resid_v < scf_tolerance && resid_n < 1e-8
+            converged = true
+            break
+        end
+        W = (1 - mixing) .* W_used .+ mixing .* W_new
+    end
+
+    if !converged
+        @warn "average_atom did not converge" Z = Z R = R T = T iterations = iterations resid_v =
+            resid_v resid_n = resid_n
+    end
+
+    potential = [-Z / r[i] + W_used[i] for i in eachindex(r)]
+    return AverageAtomResult(
+        aa.density,
+        potential,
+        aa.chemical_potential * HARTREE_TO_EV,
+        Float64(R),
+        Float64(T) * HARTREE_TO_EV,
+        aa.neutrality_residual,
+        resid_v,
+        iterations,
+        converged,
+        aa.states,
+        aa.grid,
+        aa.contour,
+    )
+end
+
+"""
+    average_atom(Z, A, rho_m, T; N=50, l_max=10, xc=nothing, mixing=0.4,
+                 max_iterations=100, free_electron_subtraction=false, ...)
+        -> AverageAtomResult
+
+Self-consistent finite-temperature average atom for nuclear charge `Z`, mass
+number `A` (atomic mass units), mass density `rho_m` (g/cm^3), and temperature
+`T` (eV).
+
+The effective potential is `V_eff(r) = -Z/r + V_H(r) + V_xc[n](r) - V_xc[n(R)]`
+and is iterated with fixed-point mixing. The Hartree potential uses the M1
+contour + Matsubara density. `xc = nothing` means zero exchange-correlation.
+
+`xc` may be a callable `xc(n::AbstractVector, r::AbstractVector)` returning the
+unsubtracted `V_xc[n](r)` on the grid; the boundary subtraction is applied by
+the driver. Density is returned in bohr^-3, potential in Hartree, and
+`chemical_potential_eV` in eV.
+
+`free_electron_subtraction = true` evaluates each partial wave as
+`n_l - n_l^free` and adds the analytic uniform free density back (S15
+Eqs. (13)/(14)). At a fixed potential it reproduces the no-subtraction density
+at a larger `l_max` to ~1e-7 relative L2. The self-consistent loop with the
+subtraction is stable for small `l_max` (e.g. 4-6) but the free tail is not
+accurate enough at `l_max = 10` for strongly structured potentials, so the
+flag is off by default.
+
+Convergence requires `self_consistency_residual < scf_tolerance` (default
+`1e-4` Ha; the M1 density's Float64 noise floor is ~1e-5) and relative
+neutrality `< 1e-8`. If convergence is not reached, a warning is emitted and
+`converged = false`.
+
+# Example
+```julia
+result = average_atom(5.0, 10.0, 10.0, 0.2)
+result.converged
+result.chemical_potential_eV
+result.density
+```
+"""
+function average_atom(
+    Z::Real,
+    A::Real,
+    rho_m::Real,
+    T::Real;
+    N::Integer = 50,
+    l_max::Integer = 10,
+    xc = nothing,
+    mixing::Real = 0.4,
+    max_iterations::Integer = 100,
+    free_electron_subtraction::Bool = false,
+    scf_tolerance::Real = 1e-4,
+    E_min::Real = 0.0,
+    E_max::Union{Nothing,Real} = nothing,
+    E_I::Union{Nothing,Real} = nothing,
+    n_vert::Integer = 1,
+    n_horiz::Integer = 20,
+    n_return::Integer = 20,
+    bound_tolerance::Real = 1e-8,
+    mu_tolerance::Real = 1e-10,
+)
+    T > 0 || throw(ArgumentError("T must be positive"))
+    R = ion_sphere_radius_bohr(A, rho_m)
+    T_Ha = T / HARTREE_TO_EV
+    return _average_atom_bohr(
+        Z,
+        R,
+        T_Ha;
+        N = N,
+        l_max = l_max,
+        xc = xc,
+        mixing = mixing,
+        max_iterations = max_iterations,
+        scf_tolerance = scf_tolerance,
+        free_electron_subtraction = free_electron_subtraction,
+        E_min = E_min,
+        E_max = E_max,
+        E_I = E_I,
+        n_vert = n_vert,
+        n_horiz = n_horiz,
+        n_return = n_return,
+        bound_tolerance = bound_tolerance,
+        mu_tolerance = mu_tolerance,
+    )
 end
