@@ -126,6 +126,66 @@ Stop conditions: a mixing schedule or accelerator is needed but not agreed.
   first.
 - 2026-10-30 -- The physical tolerances from M2 carry over; no `1e-8` target.
 
+## M2.5a findings (2026-10-30)
+
+The contour is not the primary cause. The high-`|k|` near-null Siegert states
+are.
+
+- At the converged `N=50, l_max=10` potential, the default contour encloses no
+  upper-half Siegert pole. The nearest is `l=1, Re=0.680, Im=1.978`,
+  `|norm|=2.0e-2`, outside the default `E_I=1.016`.
+- Contour refinement: default 20 panels vs 80 panels changes the density by
+  1.2e-5. With refined panels, `E_I=1.2` agrees with the base to 1.3e-8;
+  `E_I=1.5` still differs by 5.1e-3 (the contour passes near the `Im=1.978`
+  pole), and `E_I=2.0` by 7.6e-5. So the default contour is valid but has a
+  ~1e-5 quadrature error; larger `E_I` is not a fix.
+- The `N=100` failure at the wandered potential has `poles_in=0`, closest pole
+  distance ~1.0, and contour refinement changes only 1e-4 ... 1e-3. Yet the
+  density has `nmin ~ -1.3e3` and the neutrality residual ~-150. The contour
+  is not producing that error.
+- Evaluating the **same** converged `N=50` potential on larger grids (fixed
+  physical potential, `mu=1.8466`):
+
+  | N | nmin | min \|norm\| | near-null count (<1e-8) |
+  | ---: | ---: | ---: | ---: |
+  | 50 | +0.27 | 2.6e-13 | 629 |
+  | 60 | -0.035 | 5.3e-14 | 827 |
+  | 80 | -1.16 | 4.1e-15 | 1233 |
+  | 100 | -80.1 | 5.3e-16 | 1649 |
+  | 120 | -607 | 9.5e-17 | 2075 |
+
+  The density degrades with `N` even when the potential is held fixed. This is
+  a normalization/cancellation limit of the high-`|k|` Siegert states, not an
+  SCF feedback effect.
+- A `|k|` cutoff at `N=100` (same fixed potential): `|k| <= 3` is positive
+  (`nmin=0.35`) but misses 6.4 electrons (`f=+6.4`); `|k| > 3` carries the
+  negative garbage (`nmin=-82`). So truncation alone breaks neutrality, and the
+  lost tail is not negligible.
+- `free_electron_subtraction=true` leaves the `N=100` density unchanged
+  (`nmin=-80.1`, `f=-1.88`): it subtracts the analytic free partials
+  (`n_free ~ 0.1`), not the noisy high-`k` Siegert tail.
+
+## Blocker / decision needed
+
+M2.5b (the `l > l_max` free correction) and M2.5c (mixing/acceleration) cannot
+fix a high-`k` normalization failure inside each `l <= l_max`. Proceeding with
+them as written would not address the observed `N=100/150` garbage.
+
+Options:
+
+- A. Accept the `N ~ 50` limitation and close M2.5 with this diagnosis (M2 as
+  committed, plus the contour-panel note).
+- B. Try a targeted normalization change before a full rewrite: compute the
+  SPS normalization from BT07 Eq. (36) in the DVR basis, or use the
+  biorthogonal/left-eigenvector normalization, and re-measure the high-`k`
+  cancellation. M1-level but smaller than a resolvent rewrite.
+- C. M1.5: S15-style direct regular/irregular Green function or a Siegert
+  resolvent, which avoids the near-null eigenvector normalization entirely.
+- D. Proceed with M2.5b/M2.5c anyway (expected not to fix the root cause).
+
+Recommendation: B as a bounded spike, then C if B fails. Do not proceed to
+M2.5b/c as written without a decision.
+
 ## Confirmed
 
 (awaiting explicit user yes)
