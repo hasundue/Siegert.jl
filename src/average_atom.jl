@@ -550,6 +550,189 @@ function _free_partial_density(r, μ, T, l, contour, n_vert, n_horiz, n_return)
     return density
 end
 
+# ---------------------------------------------------------------------------
+# S15-style direct Green function (density backend).
+#
+# The Siegert spectral sum uses all 2N+l pseudostates and divides by the
+# near-null physical norms; at large N this loses Float64 accuracy. The direct
+# Green function integrates the radial Schrodinger equation for the regular
+# and irregular solutions at each contour/Matsubara momentum instead, so it
+# does not depend on the Siegert basis size. It is the method used in S15 and
+# Tartarus.
+#
+# `DIRECT_G_PREFACTOR` converts the S15 outgoing/Juelich Green function to the
+# project's density convention. The Siegert sum runs over the full 2N+l
+# spectrum (both +k and -k* branches), while the S15 construction uses the
+# outgoing solution only, so the structural ratio is 2. It is a convention
+# constant, not a per-case fit; the tests check the free density, the bound
+# limit, and l-independence.
+const DIRECT_G_PREFACTOR = 2.0
+
+_spherical_jp(l::Integer, z) =
+    l == 0 ? (cos.(z) ./ z .- _spherical_j(0, z) ./ z) :
+    _spherical_j(l - 1, z) .- (l + 1) ./ z .* _spherical_j(l, z)
+
+_spherical_h1p(l::Integer, z) =
+    l == 0 ? (exp.(im .* z) ./ z .- _spherical_h1(0, z) ./ z) :
+    _spherical_h1(l - 1, z) .- (l + 1) ./ z .* _spherical_h1(l, z)
+
+# Power grid clustered at the origin: r_i = R (i/N)^p.
+function _power_grid(R::Real, N::Integer, p::Real)
+    N > 0 || throw(ArgumentError("N must be positive"))
+    p > 0 || throw(ArgumentError("p must be positive"))
+    return [R * (i / N)^p for i = 1:N]
+end
+
+function _prepare_interpolation(grid, r_out)
+    idx = Vector{Int}(undef, length(r_out))
+    wts = Vector{Float64}(undef, length(r_out))
+    for (j, x) in enumerate(r_out)
+        i = clamp(searchsortedlast(grid, x), 1, length(grid) - 1)
+        idx[j] = i
+        wts[j] = (x - grid[i]) / (grid[i+1] - grid[i])
+    end
+    return idx, wts
+end
+
+# Preallocated RK4 with V sampled on the integration grid. The RK4 stage
+# values of V use linear interpolation between grid points; the power grid
+# resolves the Coulomb cusp at the origin.
+function _integrate_radial(y0, k, l, Vvals, grid)
+    n = length(grid)
+    out = Vector{ComplexF64}(undef, n)
+    P, Pp = y0
+    k2 = k^2
+    out[1] = P
+    @inbounds for i = 1:(n-1)
+        r = grid[i]
+        h = grid[i+1] - grid[i]
+        V0 = Vvals[i]
+        V1 = Vvals[i+1]
+        Vm = (V0 + V1) / 2
+        c0 = l * (l + 1) / r^2 + 2 * (V0 - k2 / 2)
+        cm = l * (l + 1) / (r + h / 2)^2 + 2 * (Vm - k2 / 2)
+        c1 = l * (l + 1) / (r + h)^2 + 2 * (V1 - k2 / 2)
+        k1P = Pp
+        k1Q = c0 * P
+        k2P = Pp + h / 2 * k1Q
+        k2Q = cm * (P + h / 2 * k1P)
+        k3P = Pp + h / 2 * k2Q
+        k3Q = cm * (P + h / 2 * k2P)
+        k4P = Pp + h * k3Q
+        k4Q = c1 * (P + h * k3P)
+        P += h / 6 * (k1P + 2k2P + 2k3P + k4P)
+        Pp += h / 6 * (k1Q + 2k2Q + 2k3Q + k4Q)
+        out[i+1] = P
+    end
+    return out, P, Pp
+end
+
+function _direct_green_partial(k, l, R, Vf, Vb, fwd, bwd, idxP, wtsP, idxI, wtsI)
+    Pg, PR, PRp = _integrate_radial((fwd[1]^(l + 1), (l + 1) * fwd[1]^l), k, l, Vf, fwd)
+    hR = _spherical_h1(l, k * R)
+    hpR = _spherical_h1p(l, k * R)
+    Ig, _, _ = _integrate_radial((R * hR, hR + k * R * hpR), k, l, Vb, bwd)
+    j = _spherical_j(l, k * R)
+    jp = _spherical_jp(l, k * R)
+    Rl = PR / R
+    Rlp = (PRp * R - PR) / R^2
+    # S15 Appendix A: argument derivatives for j,h and r-derivatives for R_l.
+    t = (1 / (im * k)) * (k * jp * Rl - j * Rlp) / (k * hpR * Rl - hR * Rlp)
+    RlR = j - im * k * hR * t
+    a = R * RlR / PR
+    Ia = reverse(Ig)
+    Pout = [(1 - w) * Pg[i] + w * Pg[i+1] for (i, w) in zip(idxP, wtsP)]
+    Iout = [(1 - w) * Ia[i] + w * Ia[i+1] for (i, w) in zip(idxI, wtsI)]
+    return a .* Pout .* Iout
+end
+
+# Continuum density for one l from the direct Green function.
+function _direct_partial_density(
+    r,
+    l,
+    μ,
+    T,
+    contour,
+    R,
+    Vf,
+    Vb,
+    fwd,
+    bwd,
+    idxP,
+    wtsP,
+    idxI,
+    wtsI;
+    n_vert = 1,
+    n_horiz = 20,
+    n_return = 20,
+)
+    pts, meas = contour_points(contour; n_vert, n_horiz, n_return)
+    r2 = r .^ 2
+    factor = 2 * (2l + 1) / (4π)
+    acc = zeros(ComplexF64, length(r))
+    for (ε, dε) in zip(pts, meas)
+        k = sqrt(2ε)
+        G =
+            -im * k .*
+            _direct_green_partial(k, l, R, Vf, Vb, fwd, bwd, idxP, wtsP, idxI, wtsI)
+        acc .+= fermi_dirac(ε, μ, T) * dε * factor * DIRECT_G_PREFACTOR .* (G ./ r2)
+    end
+    density = (1 / π) .* imag.(acc)
+    for z in contour.energies
+        k = sqrt(2z)
+        G =
+            -im * k .*
+            _direct_green_partial(k, l, R, Vf, Vb, fwd, bwd, idxP, wtsP, idxI, wtsI)
+        density .+= 2T .* real.(factor * DIRECT_G_PREFACTOR .* (G ./ r2))
+    end
+    return density
+end
+
+function _direct_continuum_density(
+    r,
+    V,
+    μ,
+    T,
+    l_max,
+    R,
+    contour,
+    fwd,
+    bwd,
+    Vf,
+    Vb,
+    idxP,
+    wtsP,
+    idxI,
+    wtsI;
+    n_vert = 1,
+    n_horiz = 20,
+    n_return = 20,
+)
+    density = zeros(Float64, length(r))
+    for l = 0:l_max
+        density .+= _direct_partial_density(
+            r,
+            l,
+            μ,
+            T,
+            contour,
+            R,
+            Vf,
+            Vb,
+            fwd,
+            bwd,
+            idxP,
+            wtsP,
+            idxI,
+            wtsI;
+            n_vert = n_vert,
+            n_horiz = n_horiz,
+            n_return = n_return,
+        )
+    end
+    return density
+end
+
 function _density_and_contour(
     data,
     r::AbstractVector,
@@ -654,6 +837,74 @@ function siegert_density(
 end
 
 """
+    _solve_chemical_potential(evaluate, energies, Z, T; ...) -> (mu, density, residual, contour)
+
+Shared neutral-potential bisection. `evaluate(mu)` must return
+`(electron_number - Z, density, contour)`.
+"""
+function _solve_chemical_potential(
+    evaluate,
+    energies,
+    Z::Real,
+    T::Real;
+    mu_tolerance::Real = 1e-10,
+    max_iterations::Integer = 100,
+    mu_guess::Union{Nothing,Real} = nothing,
+)
+    if mu_guess === nothing
+        lower = minimum(energies) - 10T
+        upper = maximum(energies) + 10T
+    else
+        # Warm start: keep the bracket near the previous chemical potential.
+        # The full spectrum's maximum energy can be far above the physical μ;
+        # evaluating the contour there may reach the top of the pseudospectrum
+        # and return garbage.
+        width = max(0.1, 5T, 0.01 * abs(mu_guess))
+        lower = Float64(mu_guess) - width
+        upper = Float64(mu_guess) + width
+    end
+    f_lower, _, _ = evaluate(lower)
+    f_upper, _, _ = evaluate(upper)
+
+    scale = max(1.0, upper - lower)
+    iterations = 0
+    while (!isfinite(f_lower) || f_lower > 0) && iterations < max_iterations
+        lower -= scale
+        scale *= 2
+        f_lower, _, _ = evaluate(lower)
+        iterations += 1
+    end
+    scale = max(1.0, upper - lower)
+    while (!isfinite(f_upper) || f_upper < 0) && iterations < max_iterations
+        upper += scale
+        scale *= 2
+        f_upper, _, _ = evaluate(upper)
+        iterations += 1
+    end
+    (isfinite(f_lower) && isfinite(f_upper) && f_lower <= 0 && f_upper >= 0) || throw(
+        ArgumentError(
+            "could not bracket the chemical potential (mu_guess = $mu_guess, " *
+            "lower = $lower, f_lower = $f_lower, upper = $upper, f_upper = $f_upper)",
+        ),
+    )
+
+    for _ = 1:max_iterations
+        midpoint = (lower + upper) / 2
+        f_mid, _, _ = evaluate(midpoint)
+        if f_mid > 0
+            upper = midpoint
+        else
+            lower = midpoint
+        end
+        (upper - lower) < mu_tolerance && break
+    end
+
+    mu = (lower + upper) / 2
+    residual, density, contour = evaluate(mu)
+    return mu, density, residual, contour
+end
+
+"""
     chemical_potential(states, Z, R, T; E_min=0, ...) -> (μ, density, residual)
 
 Solve `Z = 4π ∫_0^R r² n_e(r) dr` for the chemical potential by bisection with
@@ -705,57 +956,106 @@ function chemical_potential(
     end
 
     energies = reduce(vcat, (real.(momenta(nsps) .^ 2 ./ 2) for nsps in states))
-    if mu_guess === nothing
-        lower = minimum(energies) - 10T
-        upper = maximum(energies) + 10T
-    else
-        # Warm start: keep the bracket near the previous chemical potential.
-        # The full spectrum's maximum energy can be far above the physical μ;
-        # evaluating the contour there may reach the top of the pseudospectrum
-        # and return garbage.
-        width = max(0.1, 5T, 0.01 * abs(mu_guess))
-        lower = Float64(mu_guess) - width
-        upper = Float64(mu_guess) + width
-    end
-    f_lower, _, _ = evaluate(lower)
-    f_upper, _, _ = evaluate(upper)
-
-    scale = max(1.0, upper - lower)
-    iterations = 0
-    while (!isfinite(f_lower) || f_lower > 0) && iterations < max_iterations
-        lower -= scale
-        scale *= 2
-        f_lower, _, _ = evaluate(lower)
-        iterations += 1
-    end
-    scale = max(1.0, upper - lower)
-    while (!isfinite(f_upper) || f_upper < 0) && iterations < max_iterations
-        upper += scale
-        scale *= 2
-        f_upper, _, _ = evaluate(upper)
-        iterations += 1
-    end
-    (isfinite(f_lower) && isfinite(f_upper) && f_lower <= 0 && f_upper >= 0) || throw(
-        ArgumentError(
-            "could not bracket the chemical potential (mu_guess = $mu_guess, " *
-            "lower = $lower, f_lower = $f_lower, upper = $upper, f_upper = $f_upper)",
-        ),
+    mu, density, residual, _ = _solve_chemical_potential(
+        evaluate,
+        energies,
+        Z,
+        T;
+        mu_tolerance = mu_tolerance,
+        max_iterations = max_iterations,
+        mu_guess = mu_guess,
     )
+    return mu, density, residual
+end
 
-    for _ = 1:max_iterations
-        midpoint = (lower + upper) / 2
-        f_mid, _, _ = evaluate(midpoint)
-        if f_mid > 0
-            upper = midpoint
-        else
-            lower = midpoint
+"""
+    _free_electron_mu_estimate(Z, R, T) -> Float64
+
+Free-electron Fermi energy for the ion-sphere density `Z/(4πR³/3)`, used as a
+physical warm start for the chemical-potential bracket.
+"""
+function _free_electron_mu_estimate(Z::Real, R::Real, T::Real)
+    n = Z / (4π * R^3 / 3)
+    return (3 * π^2 * n)^(2 / 3) / 2
+end
+
+function _direct_potential_density(
+    V::Function,
+    states::AbstractVector{<:NormalizedSPS},
+    Z::Real,
+    R::Real,
+    T::Real;
+    l_max::Integer,
+    E_min::Real = 0.0,
+    E_max::Union{Nothing,Real} = nothing,
+    E_I::Union{Nothing,Real} = nothing,
+    n_vert::Integer = 1,
+    n_horiz::Integer = 20,
+    n_return::Integer = 20,
+    bound_tolerance::Real = 1e-8,
+    mu_tolerance::Real = 1e-10,
+    max_iterations::Integer = 100,
+    mu_guess::Union{Nothing,Real} = nothing,
+    direct_grid_points::Integer = 2000,
+    direct_grid_power::Real = 2.0,
+)
+    r, quadrature_weights = common_radial_grid(states)
+    volume = volume_weights(r, quadrature_weights)
+    data = _state_data(states, r)
+    r2 = r .^ 2
+    mu_guess === nothing && (mu_guess = _free_electron_mu_estimate(Z, R, T))
+    fwd = _power_grid(R, direct_grid_points, direct_grid_power)
+    bwd = reverse(fwd)
+    Vf = [V(x) for x in fwd]
+    Vb = [V(x) for x in bwd]
+    idxP, wtsP = _prepare_interpolation(fwd, r)
+    idxI, wtsI = _prepare_interpolation(reverse(bwd), r)
+    energies = reduce(vcat, (real.(momenta(nsps) .^ 2 ./ 2) for nsps in states))
+
+    function evaluate(mu)
+        contour = contour_parameters(mu, T; E_min = E_min, E_max = E_max, E_I = E_I)
+        bound = zeros(Float64, length(r))
+        _add_bound_density!(bound, data, r2, mu, T, E_min, bound_tolerance)
+        continuum = _direct_continuum_density(
+            r,
+            V,
+            mu,
+            T,
+            l_max,
+            R,
+            contour,
+            fwd,
+            bwd,
+            Vf,
+            Vb,
+            idxP,
+            wtsP,
+            idxI,
+            wtsI;
+            n_vert = n_vert,
+            n_horiz = n_horiz,
+            n_return = n_return,
+        )
+        # Replace the tail l > l_max by the free-electron tail.
+        free_tail = fill(free_electron_density(mu, T), length(r))
+        for l = 0:l_max
+            free_tail .-=
+                _free_partial_density(r, mu, T, l, contour, n_vert, n_horiz, n_return)
         end
-        (upper - lower) < mu_tolerance && break
+        density = bound .+ continuum .+ free_tail
+        electron_number = 4π * sum(volume .* density)
+        return electron_number - Z, density, contour
     end
 
-    mu = (lower + upper) / 2
-    residual, density, _ = evaluate(mu)
-    return mu, density, residual
+    return _solve_chemical_potential(
+        evaluate,
+        energies,
+        Z,
+        T;
+        mu_tolerance = mu_tolerance,
+        max_iterations = max_iterations,
+        mu_guess = mu_guess,
+    )
 end
 
 """
@@ -763,6 +1063,13 @@ end
 
 Compute the fixed-potential M1 average-atom density for `V`, nuclear charge
 `Z`, ion-sphere radius `R`, and temperature `T` in Hartree.
+
+`density_method = :direct_green` (default) uses the S15-style direct
+regular/irregular Green function for the continuum and the Siegert states only
+for the bound sum. `density_method = :siegert` keeps the M1 contour + Matsubara
+spectral sum (and the `free_electron_subtraction` option). The direct backend
+is independent of the Siegert basis size and avoids the near-null high-`k`
+cancellation.
 
 With `free_electron_subtraction = true` each partial wave is evaluated as
 `n_l - n_l^free` and the analytic free density is added back (S15
@@ -787,32 +1094,63 @@ function fixed_potential_density(
     max_iterations::Integer = 100,
     mu_guess::Union{Nothing,Real} = nothing,
     free_electron_subtraction::Bool = false,
+    density_method::Symbol = :direct_green,
+    direct_grid_points::Integer = 2000,
+    direct_grid_power::Real = 2.0,
 )
     N > 0 || throw(ArgumentError("N must be positive"))
     l_max >= 0 || throw(ArgumentError("l_max must be non-negative"))
+    direct_grid_points > 0 || throw(ArgumentError("direct_grid_points must be positive"))
+    direct_grid_power > 0 || throw(ArgumentError("direct_grid_power must be positive"))
     states = map(0:l_max) do l
         sps, basis = _solve_sps(N, l, V, R)
         NormalizedSPS(sps, basis)
     end
-    mu, density, residual = chemical_potential(
-        states,
-        Z,
-        R,
-        T;
-        E_min = E_min,
-        E_max = E_max,
-        E_I = E_I,
-        n_vert = n_vert,
-        n_horiz = n_horiz,
-        n_return = n_return,
-        bound_tolerance = bound_tolerance,
-        mu_tolerance = mu_tolerance,
-        max_iterations = max_iterations,
-        mu_guess = mu_guess,
-        free_electron_subtraction = free_electron_subtraction,
-    )
+    local mu, density, residual, contour
+    if density_method === :direct_green
+        mu, density, residual, contour = _direct_potential_density(
+            V,
+            states,
+            Z,
+            R,
+            T;
+            l_max = l_max,
+            E_min = E_min,
+            E_max = E_max,
+            E_I = E_I,
+            n_vert = n_vert,
+            n_horiz = n_horiz,
+            n_return = n_return,
+            bound_tolerance = bound_tolerance,
+            mu_tolerance = mu_tolerance,
+            max_iterations = max_iterations,
+            mu_guess = mu_guess,
+            direct_grid_points = direct_grid_points,
+            direct_grid_power = direct_grid_power,
+        )
+    elseif density_method === :siegert
+        mu, density, residual = chemical_potential(
+            states,
+            Z,
+            R,
+            T;
+            E_min = E_min,
+            E_max = E_max,
+            E_I = E_I,
+            n_vert = n_vert,
+            n_horiz = n_horiz,
+            n_return = n_return,
+            bound_tolerance = bound_tolerance,
+            mu_tolerance = mu_tolerance,
+            max_iterations = max_iterations,
+            mu_guess = mu_guess,
+            free_electron_subtraction = free_electron_subtraction,
+        )
+        contour = contour_parameters(mu, T; E_min = E_min, E_max = E_max, E_I = E_I)
+    else
+        throw(ArgumentError("density_method must be :direct_green or :siegert"))
+    end
     grid, _ = common_radial_grid(states)
-    contour = contour_parameters(mu, T; E_min = E_min, E_max = E_max, E_I = E_I)
     return AADensity(density, mu, states, grid, Float64(R), Float64(T), residual, contour)
 end
 
@@ -954,6 +1292,9 @@ function _average_atom_bohr(
     max_iterations::Integer = 100,
     scf_tolerance::Real = 1e-4,
     free_electron_subtraction::Bool = false,
+    density_method::Symbol = :direct_green,
+    direct_grid_points::Integer = 2000,
+    direct_grid_power::Real = 2.0,
     E_min::Real = 0.0,
     E_max::Union{Nothing,Real} = nothing,
     E_I::Union{Nothing,Real} = nothing,
@@ -976,7 +1317,7 @@ function _average_atom_bohr(
     setup = _dvr_interpolation_setup(dvr0)
     r = x_to_r.(dvr0.grid, R)
     W = fill(Float64(Z) / R, length(r))
-    mu_guess = nothing
+    mu_guess = _free_electron_mu_estimate(Z, R, T)
     aa = nothing
     iterations = 0
     converged = false
@@ -1005,6 +1346,9 @@ function _average_atom_bohr(
             mu_tolerance = mu_tolerance,
             mu_guess = mu_guess,
             free_electron_subtraction = free_electron_subtraction,
+            density_method = density_method,
+            direct_grid_points = direct_grid_points,
+            direct_grid_power = direct_grid_power,
         )
         mu_guess = aa.chemical_potential
         V_H = _hartree_potential(aa.density, dvr0, R)
@@ -1048,7 +1392,7 @@ end
 
 """
     average_atom(Z, A, rho_m, T; N=50, l_max=10, xc=nothing, mixing=0.4,
-                 max_iterations=100, free_electron_subtraction=false, ...)
+                 max_iterations=100, density_method=:direct_green, ...)
         -> AverageAtomResult
 
 Self-consistent finite-temperature average atom for nuclear charge `Z`, mass
@@ -1056,21 +1400,26 @@ number `A` (atomic mass units), mass density `rho_m` (g/cm^3), and temperature
 `T` (eV).
 
 The effective potential is `V_eff(r) = -Z/r + V_H(r) + V_xc[n](r) - V_xc[n(R)]`
-and is iterated with fixed-point mixing. The Hartree potential uses the M1
-contour + Matsubara density. `xc = nothing` means zero exchange-correlation.
+and is iterated with fixed-point mixing. The density backend is the S15-style
+direct Green function by default (`density_method = :direct_green`), which
+integrates the radial regular/irregular solutions and avoids the near-null
+Siegert states. The Siegert states are still built for the bound sum, the DOS,
+and the returned `states`. `density_method = :siegert` keeps the M1 spectral
+sum. `xc = nothing` means zero exchange-correlation.
 
 `xc` may be a callable `xc(n::AbstractVector, r::AbstractVector)` returning the
 unsubtracted `V_xc[n](r)` on the grid; the boundary subtraction is applied by
 the driver. Density is returned in bohr^-3, potential in Hartree, and
 `chemical_potential_eV` in eV.
 
-`free_electron_subtraction = true` evaluates each partial wave as
-`n_l - n_l^free` and adds the analytic uniform free density back (S15
-Eqs. (13)/(14)). At a fixed potential it reproduces the no-subtraction density
-at a larger `l_max` to ~1e-7 relative L2. The self-consistent loop with the
-subtraction is stable for small `l_max` (e.g. 4-6) but the free tail is not
-accurate enough at `l_max = 10` for strongly structured potentials, so the
-flag is off by default.
+`free_electron_subtraction = true` is a `:siegert`-backend option: it evaluates
+each partial wave as `n_l - n_l^free` and adds the analytic uniform free
+density back (S15 Eqs. (13)/(14)). The `:direct_green` backend always adds the
+free tail for `l > l_max`. At a fixed potential the Siegert subtraction
+reproduces the no-subtraction density at a larger `l_max` to ~1e-7 relative L2.
+The self-consistent loop with that flag is stable for small `l_max` (e.g.
+4-6) but the free tail is not accurate enough at `l_max = 10` for strongly
+structured potentials, so it is off by default.
 
 Convergence requires `self_consistency_residual < scf_tolerance` (default
 `1e-4` Ha; the M1 density's Float64 noise floor is ~1e-5) and relative
@@ -1097,6 +1446,9 @@ function average_atom(
     max_iterations::Integer = 100,
     free_electron_subtraction::Bool = false,
     scf_tolerance::Real = 1e-4,
+    density_method::Symbol = :direct_green,
+    direct_grid_points::Integer = 2000,
+    direct_grid_power::Real = 2.0,
     E_min::Real = 0.0,
     E_max::Union{Nothing,Real} = nothing,
     E_I::Union{Nothing,Real} = nothing,
@@ -1120,6 +1472,9 @@ function average_atom(
         max_iterations = max_iterations,
         scf_tolerance = scf_tolerance,
         free_electron_subtraction = free_electron_subtraction,
+        density_method = density_method,
+        direct_grid_points = direct_grid_points,
+        direct_grid_power = direct_grid_power,
         E_min = E_min,
         E_max = E_max,
         E_I = E_I,

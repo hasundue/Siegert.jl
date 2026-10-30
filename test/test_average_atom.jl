@@ -353,6 +353,7 @@ end
         N = 40,
         l_max = 10,
         free_electron_subtraction = true,
+        density_method = :siegert,
     )
     reference = fixed_potential_density(
         V,
@@ -362,6 +363,7 @@ end
         N = 40,
         l_max = 20,
         free_electron_subtraction = false,
+        density_method = :siegert,
     )
     on_at_reference = fixed_potential_density(
         V,
@@ -371,6 +373,7 @@ end
         N = 40,
         l_max = 20,
         free_electron_subtraction = true,
+        density_method = :siegert,
     )
 
     subtracted_change = relative_l2(subtracted.density, reference.density)

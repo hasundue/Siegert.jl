@@ -338,3 +338,25 @@ re-validate against the `N=50` density before integrating.
 Next: add a `density_method` option (Siegert default, direct Green function
 opt-in), use the bound Siegert states plus the direct continuum, and run a short
 self-consistent check at `N=100/150` with the physical tolerances.
+
+### Direct-G default integration (2026-10-30)
+
+- `density_method = :direct_green` is now the default for
+  `fixed_potential_density` and `average_atom`; `:siegert` remains available
+  for the M1 spectral path and the `free_electron_subtraction` test.
+- Fixed potential `N=50, l_max=1`: direct vs Siegert gives relative L2
+  `1.3e-5` and `dμ = 1.5e-4` Ha.
+- Self-consistent check (`l_max=4`, `direct_grid_points=1000`,
+  `mu_tolerance=1e-8`, `max_iterations=30`):
+  - `N=50`: converged in 17 iterations, `residV=8.99e-5`,
+    `μ=50.24702` eV, `V_eff(R)=2.4e-10`, `nmin=0.270`.
+  - `N=100`: converged in 17 iterations, `residV=8.99e-5`,
+    `μ=50.24702` eV, `V_eff(R)=1.6e-10`, `nmin=0.270`.
+  - `N=50` vs `N=100`: `|Δμ| = 2e-6` eV, density indistinguishable. The
+    near-null `N` instability is gone with the direct backend.
+- Performance: the direct-G μ solve at `l_max=4`, `direct_grid_points=1000`
+  takes ~80 s per SCF (including state builds). At `l_max=10` with the default
+  `direct_grid_points=2000, mu_tolerance=1e-10` it is much slower. Next
+  optimization: fix the contour/Matsubara momenta during the μ bisection and
+  cache the direct G per (l, momentum), which removes the ~40x repeated
+  radial integrations.
