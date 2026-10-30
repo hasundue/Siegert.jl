@@ -376,3 +376,23 @@ self-consistent check at `N=100/150` with the physical tolerances.
   check (`relL2 ~1e-5`), and the M1 tests (the Siegert basis-convergence test
   now selects `density_method=:siegert`).
 - Default direct grid: `direct_grid_points=1000`, `direct_grid_power=2`.
+
+### M2.5 close-out (2026-10-30)
+
+- M2.5a: the contour is not the primary cause; the high-`|k|` near-null
+  Siegert normalization is.
+- B1 (DVR-form/high-precision normalization evaluation): ruled out; the
+  normalization evaluation is accurate to 6e-7.
+- B2 (naive QEP biorthogonal replacement): failed; the QEP resolvent residue is
+  not the physical Siegert Green function, and the metric/boundary projection
+  is missing.
+- C (S15 direct regular/irregular Green function) was validated and adopted as
+  the default backend: free case 1e-9, `N=50` l=0/1 matches Siegert to
+  1e-5, `N=50/100` self-consistent μ agree to 2e-6 eV.
+- The direct backend uses a power grid clustered at the origin, a safeguarded
+  secant μ solver, `direct_grid_points=1000`, and `mu_tolerance=1e-10` Ha.
+- `just test` passes, including the new direct-vs-Siegert check
+  (`relL2 ~1.1e-5`, `dμ ~1.5e-4` Ha).
+- M1.5 (S15 direct Green function) is effectively realized by C; the Siegert
+  spectral path remains for DOS, resonances, and the M1 tests.
+- Remaining work is M3 (KSDT exchange-correlation, pressure, entropy, EOS).

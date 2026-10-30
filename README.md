@@ -51,17 +51,21 @@ input for the self-consistent M2 loop.
 
 - Fixed-point iteration of
   \(V_{\rm eff} = -Z/r + V_H + V_{\rm xc}[n] - V_{\rm xc}[n(R)]\)
-  (SS23 Eq. (11)), with the M1 contour + Matsubara density.
+  (SS23 Eq. (11)).
+- The default density backend is the S15-style direct Green function
+  (`density_method = :direct_green`): the regular/irregular radial solutions
+  are integrated at each contour/Matsubara momentum, so the density does not
+  use the near-null high-\(k\) Siegert pseudostates. `density_method =
+  :siegert` keeps the M1 contour + Matsubara spectral sum.
 - Pluggable exchange-correlation through `xc = nothing` or a callable
   `xc(n, r) -> V_xc[n](r)`; the driver applies the `n(R)` subtraction.
 - `average_atom(Z, A, rho_m, T)` accepts `T` in eV, `rho_m` in g/cm^3, and
   `A` in atomic mass units, and returns an `AverageAtomResult` with the
   density, potential, `μ` in eV, neutrality and self-consistency residuals,
   iteration count, convergence flag, states, grid, and contour.
-- Optional free-electron subtraction (S15 Eqs. (13)/(14)): each partial wave
-  is evaluated as \(n_l - n_l^{\rm free}\) and the analytic uniform free
-  density is added back. Validated at fixed potential; the self-consistent
-  loop is stable with it only for small `l_max` (see limitations).
+- The `:siegert` backend supports free-electron subtraction (S15
+  Eqs. (13)/(14)); the direct backend always adds the analytic free tail for
+  \(l > l_{\max}\).
 
 ## Usage
 
@@ -109,7 +113,7 @@ G = siegert_green(nsps, 0.5)
 | TON98, Phys. Rev. A **58**, 2077 (1998) | DVR basis, SPS algebraic problem, \(l=0\) normalization structure, product formula |
 | BT07, Phys. Rev. A **75**, 062704 (2007) | Nonzero-`l` DVR/SPS, normalization Eq. (37), Green's function Eq. (73), product formula Eq. (85) |
 | SS23, Phys. Rev. E **107**, 025204 (2023) | Eq. (6) normalization, Eq. (9) Green's function, Eqs. (16)-(17) DOS, Eq. (11) `V_eff`, Eq. (13) contour + Matsubara density |
-| S15, High Energy Density Phys. **16**, 18 (2015) | Green's-function AA formulation, Matsubara representation, Eqs. (13)/(14) free-electron subtraction, Appendix B contour construction |
+| S15, High Energy Density Phys. **16**, 18 (2015) | Green's-function AA formulation, Jülich regular/irregular solutions, direct Green function Eqs. (13)/(14), free-electron subtraction, Appendix A matching, Appendix B contour construction |
 
 References:
 
@@ -130,17 +134,14 @@ References:
 
 ## Current limitations
 
-- The self-consistent loop is practical only for moderate bases (`N` up to
-  ~50 with `l_max = 10`, or `N ~ 60` with smaller `l_max`). The M1 contour +
-  Matsubara sum uses all `2N + l` Siegert states, and the high-`|k|` states
-  have near-null norms whose Float64 cancellation limits the density to
-  ~1e-4 relative. Larger `N` can wander or fail to bracket the chemical
-  potential.
-- The self-consistency threshold is `1e-4` Ha, set by that noise floor rather
-  than by a 1e-8 numerical target.
-- Free-electron subtraction is validated at fixed potential, but in the
-  self-consistent loop the free tail is not accurate enough at `l_max = 10`
-  for strongly structured potentials.
+- The `:siegert` spectral backend is still limited to moderate bases (`N` up
+  to ~50 with `l_max = 10`) because the contour + Matsubara sum uses all
+  `2N + l` pseudostates and the high-\(|k|\) near-null norms lose Float64
+  accuracy. The default `:direct_green` backend avoids this and is stable at
+  `N = 100/150`.
+- The direct backend's self-consistency threshold is `1e-4` Ha (the physical
+  target); the μ solve is a safeguarded secant with `mu_tolerance = 1e-10`
+  Ha absolute.
 - No exchange-correlation model beyond the pluggable interface, and no
   pressure, entropy, free energy, or equation of state.
 - Non-relativistic, spherical, single-channel, integer `l`.
