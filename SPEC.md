@@ -267,6 +267,33 @@ Revised options:
 Recommendation: C is now the more reliable route. B2-W is worth continuing
 only if keeping the spectral sum is a hard requirement. A remains valid.
 
+### C prototype result (2026-10-30)
+
+S15-style direct Green function implemented for `l=0` (RK4 radial
+regular/irregular solutions, Juelich matching, S15 Eq. (14) free form):
+
+- Free case (`V=0`): `direct_G` matches `r^2 j_l(kr) h^+_l(kr)` to `1e-9`.
+- Interacting `N=50, l_max=0` potential: the direct continuum matches the
+  current Siegert continuum with a *constant* prefactor `2.0000000007` over the
+  grid. The factor `2` is the spin convention in the project's
+  `2(2l+1)/(4π)`; with `pref=2` the two continua agree.
+- Total density (Siegert bound part + direct continuum, `pref=2`):
+  - `nsteps=2000`: `nmin=0.1466`, `nmax=92.1`, relative L2 vs current
+    `1.5e-4`,
+  - `nsteps=4000`: `nmin=0.1466`, `nmax=92.1`, relative L2 vs current
+    `6.3e-5`, change vs `nsteps=2000` `9.1e-5`.
+
+The direct method is independent of the Siegert basis size, so it avoids the
+near-null problem. The naive implementation costs ~36 s per density at
+`nsteps=4000` (heavy allocations), so the production backend needs
+optimization (cached k-points, fewer allocations, coarser/adaptive grid,
+possibly parallel contour points).
+
+Next step for C: optimize the `l=0` density, extend to `l>0`, and integrate it
+as the density backend while keeping the Siegert states for the bound sum, DOS,
+and resonance API. Then run a short self-consistent check at `N=100/150` with
+the physical tolerances.
+
 ## Confirmed
 
 (awaiting explicit user yes)
