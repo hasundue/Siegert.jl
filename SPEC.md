@@ -289,8 +289,8 @@ remain testable without reaching into private functions.
       verify: `just test average_atom`
 
 - [ ] `N = 50, 100, 150` on the same test potential gives a stable `μ`
-      (change below `1e-4` Ha) and density (relative `L2` change below
-      `1e-2`); report the actual numbers in the test output.
+      (change below `1e-8` Ha) and density (relative `L2` change below
+      `1e-6`); report the actual numbers in the test output.
       verify: `just test average_atom`
 
 - [ ] Existing DVR and SPS tests still pass.

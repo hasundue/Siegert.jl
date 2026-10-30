@@ -200,8 +200,10 @@ end
         println("convergence: N=$N mu=$(result.chemical_potential)")
     end
 
+    # Observed changes are ~1e-10 (mu) and ~1e-11 (density); the tighter
+    # thresholds still leave margin for BLAS/platform differences.
     mus = [results[N].chemical_potential for N in (50, 100, 150)]
-    @test maximum(mus) - minimum(mus) < 1e-4
+    @test maximum(mus) - minimum(mus) < 1e-8
 
     r_ref = collect(range(1e-3, R; length = 100))
     densities = [
@@ -216,6 +218,6 @@ end
     for i = 1:2
         change = relative_l2(densities[i+1], densities[i])
         println("convergence: density relative L2 change $(i) = $change")
-        @test change < 1e-2
+        @test change < 1e-6
     end
 end
