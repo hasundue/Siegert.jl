@@ -105,6 +105,12 @@ end
     @test maximum(abs.(delta .* G .- residue)) / maximum(abs.(residue)) < 1e-6
 end
 
+# Free-electron DOS sanity check on the real axis. The ~1e-3 error here is
+# finite-basis/common-grid quadrature, not a formula error. It is capped at
+# N = 5,6,7 because V = 0 produces near-null SPS norms at N >= 8.
+# Free-electron subtraction (S15 Eq. (13)/(14); SS23 treats l > l_max as free
+# electrons) would improve this; revisit or remove this test when that M2 work
+# lands.
 @testset "Average atom: free-electron DOS" begin
     R_values = (1.0, 2.0)
     N_values = (5, 6, 7)
