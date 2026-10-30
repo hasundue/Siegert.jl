@@ -320,3 +320,21 @@ re-validate against the `N=50` density before integrating.
 ## Confirmed
 
 (awaiting explicit user yes)
+
+### Power-grid optimization and l>0 validation (2026-10-30)
+
+- Nonuniform power grid `r_i = R (i/N)^p` with `p=2`, `N=2000` removes the
+  origin-clustering problem. Cost is 0.02-0.1 s per partial-wave density
+  (vs ~20-35 s for the exact-V uniform-grid version).
+- Against the exact-V reference at `N=50, l_max=0`, the optimized continuum
+  agrees to relative L2 `1.5e-4` (within the M1 noise and the physical
+  tolerances).
+- At fixed `N=50, l_max=1`, the direct-G total density (Siegert bound +
+  direct continuum for l=0,1) agrees with the current Siegert density to
+  relative L2 `1.3e-5`; `nmin=0.224`, `nmax=62.88`, both positive.
+- The direct Green function itself is correct for `l=0,1,2`; the factor 2 is
+  the SPS full-spectrum vs S15 outgoing convention.
+
+Next: add a `density_method` option (Siegert default, direct Green function
+opt-in), use the bound Siegert states plus the direct continuum, and run a short
+self-consistent check at `N=100/150` with the physical tolerances.
