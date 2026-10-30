@@ -231,6 +231,42 @@ Options:
 Recommendation: B2 is now the preferred next step for keeping the Siegert
 spectral sum; C remains the fallback. A is still valid for closing M2.5.
 
+### B2 prototype result (2026-10-30)
+
+The first B2 prototype (replace the self-normalized `P_n^2 / N_n` by the QEP
+biorthogonal `P_n^R P_n^L / ov_n`, with `ov_n = d_n^T (B + 2 lambda_n I) c_n`)
+**failed**:
+
+- At `N=50` with the fixed physical potential, the biorthogonal density has
+  `nmax = 21.7` vs the current `92.1`, and `biorth/current` is not a constant
+  (median ~0, mean ~5.4). The shape and scale are wrong, not just a factor.
+- At `N=100` the biorthogonal density has `nmin = -30.4`, so it is not stable.
+
+The reason is that the QEP biorthogonal residue is the residue of the
+*coefficient-space QEP resolvent*, not of the physical Siegert Green's
+function. The physical `G_l` uses the self-normalized SPS (the Siegert inner
+product), and the metric `rho`/boundary terms are missing from the naive
+`P^R P^L / ov` replacement. The promising `4e5` diagnostic was for the QEP
+resolvent, so it does not transfer directly.
+
+Remaining B2 variant: use the extended-space self-orthogonality
+`y_n^T W y_m = 2 lambda_n delta_nm` with the correct weight `W` for the
+project's companion matrix, and derive the physical projection with `rho` and
+the boundary terms. This is additional research (uncertain), not a drop-in
+normalization change.
+
+Revised options:
+
+- A. Accept the `N ~ 50` limitation and close M2.5 with this diagnosis.
+- B2-W. Continue B2 with the correct `W`-weighted extended-space derivation.
+  Research-level; success uncertain.
+- C. M1.5: S15-style direct regular/irregular Green function or a Siegert
+  resolvent, which avoids the near-null eigenvector normalization entirely.
+- D. Proceed with M2.5b/M2.5c anyway (expected not to fix the root cause).
+
+Recommendation: C is now the more reliable route. B2-W is worth continuing
+only if keeping the spectral sum is a hard requirement. A remains valid.
+
 ## Confirmed
 
 (awaiting explicit user yes)
