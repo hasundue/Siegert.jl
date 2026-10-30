@@ -47,6 +47,26 @@ Bohr.
 M1 does **not** update the effective potential. It is the fixed-potential
 input for the self-consistent M2 loop.
 
+### Self-consistent average atom (M2)
+
+- Fixed-point iteration of
+  \(V_{\rm eff} = -Z/r + V_H + V_{\rm xc}[n] - V_{\rm xc}[n(R)]\)
+  (SS23 Eq. (11)).
+- The default density backend is the S15-style direct Green function
+  (`density_method = :direct_green`): the regular/irregular radial solutions
+  are integrated at each contour/Matsubara momentum, so the density does not
+  use the near-null high-\(k\) Siegert pseudostates. `density_method =
+  :siegert` keeps the M1 contour + Matsubara spectral sum.
+- Pluggable exchange-correlation through `xc = nothing` or a callable
+  `xc(n, r) -> V_xc[n](r)`; the driver applies the `n(R)` subtraction.
+- `average_atom(Z, A, rho_m, T)` accepts `T` in eV, `rho_m` in g/cm^3, and
+  `A` in atomic mass units, and returns an `AverageAtomResult` with the
+  density, potential, `μ` in eV, neutrality and self-consistency residuals,
+  iteration count, convergence flag, states, grid, and contour.
+- The `:siegert` backend supports free-electron subtraction (S15
+  Eqs. (13)/(14)); the direct backend always adds the analytic free tail for
+  \(l > l_{\max}\).
+
 ## Usage
 
 ```julia
@@ -68,6 +88,12 @@ aa.chemical_potential
 aa.density
 aa.neutrality_residual
 aa.contour
+
+# Self-consistent average atom: T in eV, rho_m in g/cm^3, A in u
+aa2 = average_atom(5.0, 10.0, 10.0, 0.2; N = 50, l_max = 10)
+aa2.converged
+aa2.chemical_potential_eV
+aa2.self_consistency_residual
 ```
 
 SPS states are raw by default for scattering-only use. The AA layer wraps them
@@ -86,8 +112,8 @@ G = siegert_green(nsps, 0.5)
 | --- | --- |
 | TON98, Phys. Rev. A **58**, 2077 (1998) | DVR basis, SPS algebraic problem, \(l=0\) normalization structure, product formula |
 | BT07, Phys. Rev. A **75**, 062704 (2007) | Nonzero-`l` DVR/SPS, normalization Eq. (37), Green's function Eq. (73), product formula Eq. (85) |
-| SS23, Phys. Rev. E **107**, 025204 (2023) | Eq. (6) normalization, Eq. (9) Green's function, Eqs. (16)-(17) DOS, Eq. (13) contour + Matsubara density |
-| S15, High Energy Density Phys. **16**, 18 (2015) | Green's-function AA formulation, Matsubara representation, Appendix B contour construction |
+| SS23, Phys. Rev. E **107**, 025204 (2023) | Eq. (6) normalization, Eq. (9) Green's function, Eqs. (16)-(17) DOS, Eq. (11) `V_eff`, Eq. (13) contour + Matsubara density |
+| S15, High Energy Density Phys. **16**, 18 (2015) | Green's-function AA formulation, Jülich regular/irregular solutions, direct Green function Eqs. (13)/(14), free-electron subtraction, Appendix A matching, Appendix B contour construction |
 
 References:
 
@@ -108,12 +134,16 @@ References:
 
 ## Current limitations
 
-- Fixed `V_eff` only; no self-consistent AA loop.
-- No exchange-correlation model, pressure, entropy, free energy, or equation
-  of state.
-- No free-electron subtraction / high-`l` acceleration. This currently limits
-  the real-axis free-electron DOS test and the accuracy of high angular
-  momentum sums.
+- The `:siegert` spectral backend is still limited to moderate bases (`N` up
+  to ~50 with `l_max = 10`) because the contour + Matsubara sum uses all
+  `2N + l` pseudostates and the high-\(|k|\) near-null norms lose Float64
+  accuracy. The default `:direct_green` backend avoids this and is stable at
+  `N = 100/150`.
+- The direct backend's self-consistency threshold is `1e-4` Ha (the physical
+  target); the μ solve is a safeguarded secant with `mu_tolerance = 1e-10`
+  Ha absolute.
+- No exchange-correlation model beyond the pluggable interface, and no
+  pressure, entropy, free energy, or equation of state.
 - Non-relativistic, spherical, single-channel, integer `l`.
 - Off-diagonal Green's function \(G_l(r,r';k)\) for \(r\ne r'\) is not exposed.
 
@@ -121,11 +151,11 @@ References:
 
 ### M2: self-consistent average atom
 
-- Build `V_eff` from `-Z/r`, the Hartree potential, and a pluggable `V_xc`.
-- Iterate the density, potential, and chemical potential to self-consistency.
-- Add free-electron subtraction for the angular-momentum sum.
-- Expose `average_atom(Z, A, rho_m, T)`, converting `T` from eV and `rho_m`
-  from g/cm^3 at the public API boundary.
+- Implemented: `V_eff` from `-Z/r`, the Hartree potential, and a pluggable
+  `V_xc`; fixed-point iteration; `average_atom(Z, A, rho_m, T)` with eV and
+  g/cm^3 conversions; optional free-electron subtraction.
+- Remaining M1-level work: a better-conditioned density evaluation for larger
+  bases (S15-style direct Green function or a Siegert resolvent formulation).
 
 ### M3: exchange-correlation, pressure, and equation of state
 

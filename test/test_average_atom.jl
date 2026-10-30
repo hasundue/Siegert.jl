@@ -194,8 +194,18 @@ end
     T = 0.3
     l_max = 3
     results = Dict{Int,AADensity}()
+    # This test is about the Siegert basis itself; the direct-G backend is
+    # independent of N apart from the bound sum.
     for N in (50, 100, 150)
-        result = fixed_potential_density(V, Z, R, T; N = N, l_max = l_max)
+        result = fixed_potential_density(
+            V,
+            Z,
+            R,
+            T;
+            N = N,
+            l_max = l_max,
+            density_method = :siegert,
+        )
         results[N] = result
         println("convergence: N=$N mu=$(result.chemical_potential)")
     end
@@ -220,4 +230,198 @@ end
         println("convergence: density relative L2 change $(i) = $change")
         @test change < 1e-6
     end
+end
+
+# --- M2: self-consistent average atom -------------------------------------
+
+@testset "Average atom M2: self-consistency and boundary" begin
+    result = average_atom(5.0, 10.0, 10.0, 0.2; N = 50, l_max = 10)
+
+    @test result.converged
+    @test result.self_consistency_residual < 1e-4
+    @test abs(result.neutrality_residual) / 5.0 < 1e-8
+    @test abs(result.potential[end]) < 1e-8
+    @test minimum(result.density) > -1e-8
+    @test result.iterations > 0
+    @test length(result.density) == length(result.grid)
+    @test length(result.potential) == length(result.grid)
+    @test isfinite(result.chemical_potential_eV)
+    @test result.radius_bohr > 0
+    @test result.temperature_eV == 0.2
+
+    println(
+        "M2 self-consistency: iterations=",
+        result.iterations,
+        " self_consistency_residual=",
+        result.self_consistency_residual,
+        " neutrality_residual=",
+        result.neutrality_residual,
+        " V_eff(R)=",
+        result.potential[end],
+        " chemical_potential_eV=",
+        result.chemical_potential_eV,
+    )
+end
+
+@testset "Average atom M2: unit conversion" begin
+    Z = 5.0
+    A = 10.0
+    rho_m = 10.0
+    T_eV = 0.2
+    R_expected =
+        (3 * A * 1.66053906660e-27 / (4π * rho_m * 1000.0))^(1 / 3) / 5.29177210903e-11
+    T_Ha = T_eV / 27.211386245988
+
+    from_units = average_atom(Z, A, rho_m, T_eV; N = 40, l_max = 4)
+    from_bohr = Siegert._average_atom_bohr(Z, R_expected, T_Ha; N = 40, l_max = 4)
+
+    @test from_units.radius_bohr ≈ R_expected
+    @test from_units.temperature_eV ≈ T_eV
+    @test from_bohr.radius_bohr ≈ R_expected
+    @test from_bohr.temperature_eV ≈ T_eV
+    @test relative_l2(from_units.density, from_bohr.density) < 1e-10
+    @test abs(from_units.chemical_potential_eV - from_bohr.chemical_potential_eV) < 1e-8
+
+    @test Siegert.HARTREE_TO_EV ≈ 27.211386245988
+    @test Siegert.ATOMIC_MASS_UNIT_KG ≈ 1.66053906660e-27
+    @test Siegert.BOHR_RADIUS_M ≈ 5.29177210903e-11
+end
+
+@testset "Average atom M2: pluggable exchange-correlation" begin
+    base = average_atom(5.0, 10.0, 10.0, 0.2; N = 40, l_max = 4)
+
+    # A constant V_xc cancels in the boundary subtraction and must leave the
+    # result unchanged (up to the M1 density noise).
+    xc_const(n, r) = fill(0.3, length(n))
+    const_result = average_atom(5.0, 10.0, 10.0, 0.2; N = 40, l_max = 4, xc = xc_const)
+    @test const_result.converged
+    @test relative_l2(const_result.density, base.density) < 1e-3
+    @test maximum(abs.(const_result.potential .- base.potential)) < 1e-3
+
+    # A non-constant V_xc must change V_eff while preserving V_eff(R) = 0,
+    # which verifies that the boundary subtraction is applied exactly once.
+    xc_linear(n, r) = 0.1 .* r
+    linear_result = average_atom(5.0, 10.0, 10.0, 0.2; N = 40, l_max = 4, xc = xc_linear)
+    @test linear_result.converged
+    @test abs(linear_result.potential[end]) < 1e-8
+    @test maximum(abs.(linear_result.potential .- base.potential)) > 1e-3
+end
+
+@testset "Average atom M2: self-consistent basis convergence" begin
+    R = Siegert.ion_sphere_radius_bohr(10.0, 10.0)
+    r_ref = collect(range(1e-3, R; length = 100))
+    T_Ha = 0.2 / Siegert.HARTREE_TO_EV
+    results = Dict{Int,AverageAtomResult}()
+
+    for N in (30, 40, 50)
+        result = average_atom(5.0, 10.0, 10.0, 0.2; N = N, l_max = 10)
+        results[N] = result
+        @test result.converged
+        println(
+            "M2 convergence: N=",
+            N,
+            " iterations=",
+            result.iterations,
+            " chemical_potential_eV=",
+            result.chemical_potential_eV,
+            " self_consistency_residual=",
+            result.self_consistency_residual,
+        )
+    end
+
+    mus = [results[N].chemical_potential_eV for N in (30, 40, 50)]
+    println("M2 convergence: max |Δμ| = ", maximum(mus) - minimum(mus), " eV")
+    @test maximum(mus) - minimum(mus) < 1e-2
+
+    densities = [
+        siegert_density(
+            results[N].states,
+            results[N].chemical_potential_eV / Siegert.HARTREE_TO_EV,
+            T_Ha;
+            r = r_ref,
+            weights = ones(length(r_ref)),
+        ) for N in (30, 40, 50)
+    ]
+    for i = 1:2
+        change = relative_l2(densities[i+1], densities[i])
+        println("M2 convergence: density relative L2 change ", i, " = ", change)
+        @test change < 1e-2
+    end
+end
+
+@testset "Average atom M2: free-electron subtraction" begin
+    R = Siegert.ion_sphere_radius_bohr(10.0, 10.0)
+    T = 0.2 / Siegert.HARTREE_TO_EV
+    Z = 5.0
+    V = r -> r >= R ? 0.0 : -Z / r + Z / R
+
+    subtracted = fixed_potential_density(
+        V,
+        Z,
+        R,
+        T;
+        N = 40,
+        l_max = 10,
+        free_electron_subtraction = true,
+        density_method = :siegert,
+    )
+    reference = fixed_potential_density(
+        V,
+        Z,
+        R,
+        T;
+        N = 40,
+        l_max = 20,
+        free_electron_subtraction = false,
+        density_method = :siegert,
+    )
+    on_at_reference = fixed_potential_density(
+        V,
+        Z,
+        R,
+        T;
+        N = 40,
+        l_max = 20,
+        free_electron_subtraction = true,
+        density_method = :siegert,
+    )
+
+    subtracted_change = relative_l2(subtracted.density, reference.density)
+    on_off_change = relative_l2(on_at_reference.density, reference.density)
+    println(
+        "M2 free-electron subtraction: l_max=10 subtracted vs l_max=20 reference = ",
+        subtracted_change,
+        ", on/off at l_max=20 = ",
+        on_off_change,
+    )
+    @test subtracted_change < 1e-6
+    @test on_off_change < 1e-6
+    @test abs(subtracted.chemical_potential - reference.chemical_potential) < 1e-5
+end
+
+@testset "Average atom M2.5: direct-G backend vs Siegert" begin
+    R = Siegert.ion_sphere_radius_bohr(10.0, 10.0)
+    T = 0.2 / Siegert.HARTREE_TO_EV
+    Z = 5.0
+    V = r -> r >= R ? 0.0 : -Z / r + Z / R
+
+    direct = fixed_potential_density(
+        V,
+        Z,
+        R,
+        T;
+        N = 50,
+        l_max = 1,
+        density_method = :direct_green,
+    )
+    siegert =
+        fixed_potential_density(V, Z, R, T; N = 50, l_max = 1, density_method = :siegert)
+
+    change = relative_l2(direct.density, siegert.density)
+    delta_mu = abs(direct.chemical_potential - siegert.chemical_potential)
+    println("M2.5 direct vs Siegert: relL2 = ", change, ", dmu = ", delta_mu)
+    @test change < 1e-4
+    @test delta_mu < 1e-3
+    @test minimum(direct.density) > -1e-8
+    @test abs(direct.neutrality_residual) / Z < 1e-8
 end

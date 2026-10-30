@@ -7,7 +7,7 @@ module Siegert
 
 using Jacobi: zgrjp, wgrjp
 using LinearAlgebra: Diagonal, eigen, I
-using SpecialFunctions: loggamma
+using SpecialFunctions: besselh, besselj, loggamma
 
 export AbstractSPS
 export NormalizedSPS
@@ -16,7 +16,9 @@ export SPS
 export square_well
 export scattering_matrix, phase_shift
 export AADensity
+export AverageAtomResult
 export Contour
+export average_atom
 export chemical_potential
 export common_radial_grid
 export contour_parameters
