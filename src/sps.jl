@@ -103,7 +103,7 @@ function sps_matrices(N::Integer, l::Real, a::Real, V::Function)
     K̃ = kinetic_dvr(T, φ)
     H̃ = K̃ + U
 
-    return K̃, ρ, L, H̃, x, r, π[:, end]
+    return K̃, ρ, L, H̃, dvr, r, π[:, end]
 end
 
 """
@@ -180,12 +180,17 @@ function sps_linearize_qep(H̃, ρ, L, a, π, z::AbstractVector)
     return M
 end
 
+abstract type AbstractSPS end
+
 """
 SPS (Siegert Pseudostate) solution data structure.
 
+This is the raw eigenproblem result. Average-atom data such as the DVR basis,
+normalized coefficients, and normalization constants live in `NormalizedSPS`.
+
 Fields:
 - `momenta`: Complex momenta k (Siegert eigenvalues)
-- `coefficients`: Expansion coefficients C in DVR basis
+- `coefficients`: Raw expansion coefficients C in DVR basis
 - `grid`: Grid points r on [0,a]
 - `box_size`: Box size a
 - `angular_momentum`: Angular momentum quantum number l
@@ -193,7 +198,7 @@ Fields:
 - `metric`: Metric matrix ρ in DVR
 - `boundary`: Boundary matrix L
 """
-struct SPS
+struct SPS <: AbstractSPS
     momenta::Vector{ComplexF64}
     coefficients::Matrix{ComplexF64}
     grid::Vector{Float64}
@@ -203,6 +208,16 @@ struct SPS
     metric::Matrix{Float64}
     boundary::Matrix{Float64}
 end
+
+# Accessors shared by raw and average-atom Siegert states.
+momenta(s::SPS) = s.momenta
+coefficients(s::SPS) = s.coefficients
+grid(s::SPS) = s.grid
+box_size(s::SPS) = s.box_size
+angular_momentum(s::SPS) = s.angular_momentum
+hamiltonian(s::SPS) = s.hamiltonian
+metric(s::SPS) = s.metric
+boundary(s::SPS) = s.boundary
 
 """
     SPS(N, l, V, a) -> SPS
@@ -216,8 +231,9 @@ Solve the SPS quadratic eigenvalue problem for Siegert states. [TON98, BT07]
 - `a::Real`: Box size (cutoff radius)
 
 # Returns
-- `SPS`: Siegert pseudostate solution containing the `2N + l` eigenvalues and
-  eigenvectors
+- `SPS`: raw Siegert pseudostate solution containing the `2N + l` eigenvalues
+  and eigenvectors. Wrap it in `NormalizedSPS` before using the
+  average-atom layer.
 
 # Example
 ```julia
@@ -227,17 +243,22 @@ sps = SPS(19, 1, V, 1.0)  # p-wave
 ```
 """
 function SPS(N::Integer, l::Integer, V::Function, a::Real)
+    sps, _ = _solve_sps(N, l, V, a)
+    return sps
+end
+
+function _solve_sps(N::Integer, l::Integer, V::Function, a::Real)
     l < 0 && throw(ArgumentError("l must be ≥ 0"))
-    K̃, ρ, L, H̃, x, r, π = sps_matrices(N, l, a, V)
+    K̃, ρ, L, H̃, dvr, r, π = sps_matrices(N, l, a, V)
     z = reverse_bessel_zeros(l)
     AL = sps_linearize_qep(H̃, ρ, L, a, π, z)
     F = eigen(AL)
     k = -im .* F.values
     Y = F.vectors
-    c = Array(@view Y[1:N, :])
-    return SPS(
+    c = ComplexF64.(Array(@view Y[1:N, :]))
+    sps = SPS(
         ComplexF64.(k),
-        ComplexF64.(c),
+        c,
         Float64.(r),
         Float64(a),
         Int(l),
@@ -245,4 +266,5 @@ function SPS(N::Integer, l::Integer, V::Function, a::Real)
         Matrix{Float64}(ρ),
         Matrix{Float64}(L),
     )
+    return sps, dvr
 end

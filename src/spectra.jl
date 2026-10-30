@@ -14,20 +14,20 @@
 using LinearAlgebra: Symmetric, eigen, dot
 
 """
-    scattering_matrix(sps::SPS) -> (k::Real) -> ComplexF64
+    scattering_matrix(sps::AbstractSPS) -> (k::Real) -> ComplexF64
 
 Product formula over all `2N + l` SPS momenta. [BT07 Eq.(85)]
 """
-function scattering_matrix(sps::SPS)
-    ks = sps.momenta
-    a = sps.box_size
+function scattering_matrix(sps::AbstractSPS)
+    ks = momenta(sps)
+    a = box_size(sps)
     return function (k::Real)
         P = prod(((kn + k) / (kn - k) for kn in ks))
         cis(-2k * a) * P
     end
 end
 
-function phase_shift(sps::SPS)
+function phase_shift(sps::AbstractSPS)
     S = scattering_matrix(sps)
     return function (k::Real)
         z = S(k)

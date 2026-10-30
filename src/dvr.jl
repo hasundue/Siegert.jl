@@ -36,12 +36,39 @@ end
 
 """
 Squared L2 norm h_n of P_n^(α,β) on [-1,1] with weight (1-x)^α(1+x)^β.
+
+The log-gamma form avoids overflow for the large basis sizes used by the
+average-atom layer.
 """
 function jacobi_normsq(n::Integer, α::Real, β::Real)
     n < 0 && throw(DomainError(n, "n must be ≥ 0"))
-    num = 2^(α + β + 1) * gamma(n + α + 1) * gamma(n + β + 1)
-    den = (2n + α + β + 1) * gamma(n + α + β + 1) * gamma(n + 1)
-    return num / den
+    logh =
+        (α + β + 1) * log(2) + loggamma(n + α + 1) + loggamma(n + β + 1) -
+        loggamma(n + α + β + 1) - loggamma(n + 1) - log(2n + α + β + 1)
+    return exp(logh)
+end
+
+"""
+Evaluate Jacobi polynomials `P_n^(α,β)(x)` for `n = 0:(N-1)` by the
+three-term recurrence. Returns an `N × length(x)` matrix.
+
+This local recurrence is used instead of the external `jacobi` routine because
+the latter overflows for the basis sizes needed by the average-atom driver.
+"""
+function jacobi_polynomials(x::AbstractVector{<:Real}, α::Real, β::Real, N::Integer)
+    N < 1 && throw(DomainError(N, "N must be ≥ 1"))
+    P = Matrix{Float64}(undef, N, length(x))
+    P[1, :] .= 1.0
+    N == 1 && return P
+
+    P[2, :] .= (α - β) / 2 .+ (α + β + 2) / 2 .* x
+    for n = 1:(N-2)
+        a = 2 * (n + 1) * (n + α + β + 1) * (2n + α + β)
+        b = (2n + α + β + 1) .* ((2n + α + β) * (2n + α + β + 2) .* x .+ (α^2 - β^2))
+        c = 2 * (n + α) * (n + β) * (2n + α + β + 2)
+        P[n+2, :] .= (b .* P[n+1, :] .- c .* P[n, :]) ./ a
+    end
+    return P
 end
 
 """
@@ -57,8 +84,8 @@ function jacobi_basis(x::Vector{<:Real}, α::Real, β::Real)
     w = jacobi_weight.(x, α, β)
     i = 0:(N-1) # n-1 indices for 0-based based functions, being consistent with TON98 (C6)
     h = jacobi_normsq.(i, α, β)
-    P = jacobi.(x', i, α, β)
-    return sqrt.(w' ./ h) .* P
+    P = jacobi_polynomials(x, α, β, N)
+    return sqrt.(reshape(w, 1, :) ./ reshape(h, :, 1)) .* P
 end
 
 """
