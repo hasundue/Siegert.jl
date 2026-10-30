@@ -888,18 +888,27 @@ function _solve_chemical_potential(
         ),
     )
 
+    # Safeguarded secant: superlinear for the smooth density, with the
+    # bracket as a fallback so it stays robust.
+    x0, f0 = lower, f_lower
+    x1, f1 = upper, f_upper
     for _ = 1:max_iterations
-        midpoint = (lower + upper) / 2
-        f_mid, _, _ = evaluate(midpoint)
-        if f_mid > 0
-            upper = midpoint
-        else
-            lower = midpoint
+        x2 = f1 == f0 ? (lower + upper) / 2 : x1 - f1 * (x1 - x0) / (f1 - f0)
+        if !isfinite(x2) || x2 <= lower || x2 >= upper
+            x2 = (lower + upper) / 2
         end
+        f2, _, _ = evaluate(x2)
+        if f2 > 0
+            upper = x2
+        else
+            lower = x2
+        end
+        x0, f0 = x1, f1
+        x1, f1 = x2, f2
         (upper - lower) < mu_tolerance && break
     end
 
-    mu = (lower + upper) / 2
+    mu = clamp(x1, lower, upper)
     residual, density, contour = evaluate(mu)
     return mu, density, residual, contour
 end
@@ -996,7 +1005,7 @@ function _direct_potential_density(
     mu_tolerance::Real = 1e-10,
     max_iterations::Integer = 100,
     mu_guess::Union{Nothing,Real} = nothing,
-    direct_grid_points::Integer = 2000,
+    direct_grid_points::Integer = 1000,
     direct_grid_power::Real = 2.0,
 )
     r, quadrature_weights = common_radial_grid(states)
@@ -1095,7 +1104,7 @@ function fixed_potential_density(
     mu_guess::Union{Nothing,Real} = nothing,
     free_electron_subtraction::Bool = false,
     density_method::Symbol = :direct_green,
-    direct_grid_points::Integer = 2000,
+    direct_grid_points::Integer = 1000,
     direct_grid_power::Real = 2.0,
 )
     N > 0 || throw(ArgumentError("N must be positive"))
@@ -1293,7 +1302,7 @@ function _average_atom_bohr(
     scf_tolerance::Real = 1e-4,
     free_electron_subtraction::Bool = false,
     density_method::Symbol = :direct_green,
-    direct_grid_points::Integer = 2000,
+    direct_grid_points::Integer = 1000,
     direct_grid_power::Real = 2.0,
     E_min::Real = 0.0,
     E_max::Union{Nothing,Real} = nothing,
@@ -1447,7 +1456,7 @@ function average_atom(
     free_electron_subtraction::Bool = false,
     scf_tolerance::Real = 1e-4,
     density_method::Symbol = :direct_green,
-    direct_grid_points::Integer = 2000,
+    direct_grid_points::Integer = 1000,
     direct_grid_power::Real = 2.0,
     E_min::Real = 0.0,
     E_max::Union{Nothing,Real} = nothing,

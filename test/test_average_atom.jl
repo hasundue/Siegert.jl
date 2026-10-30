@@ -194,8 +194,18 @@ end
     T = 0.3
     l_max = 3
     results = Dict{Int,AADensity}()
+    # This test is about the Siegert basis itself; the direct-G backend is
+    # independent of N apart from the bound sum.
     for N in (50, 100, 150)
-        result = fixed_potential_density(V, Z, R, T; N = N, l_max = l_max)
+        result = fixed_potential_density(
+            V,
+            Z,
+            R,
+            T;
+            N = N,
+            l_max = l_max,
+            density_method = :siegert,
+        )
         results[N] = result
         println("convergence: N=$N mu=$(result.chemical_potential)")
     end
@@ -387,4 +397,31 @@ end
     @test subtracted_change < 1e-6
     @test on_off_change < 1e-6
     @test abs(subtracted.chemical_potential - reference.chemical_potential) < 1e-5
+end
+
+@testset "Average atom M2.5: direct-G backend vs Siegert" begin
+    R = Siegert.ion_sphere_radius_bohr(10.0, 10.0)
+    T = 0.2 / Siegert.HARTREE_TO_EV
+    Z = 5.0
+    V = r -> r >= R ? 0.0 : -Z / r + Z / R
+
+    direct = fixed_potential_density(
+        V,
+        Z,
+        R,
+        T;
+        N = 50,
+        l_max = 1,
+        density_method = :direct_green,
+    )
+    siegert =
+        fixed_potential_density(V, Z, R, T; N = 50, l_max = 1, density_method = :siegert)
+
+    change = relative_l2(direct.density, siegert.density)
+    delta_mu = abs(direct.chemical_potential - siegert.chemical_potential)
+    println("M2.5 direct vs Siegert: relL2 = ", change, ", dmu = ", delta_mu)
+    @test change < 1e-4
+    @test delta_mu < 1e-3
+    @test minimum(direct.density) > -1e-8
+    @test abs(direct.neutrality_residual) / Z < 1e-8
 end

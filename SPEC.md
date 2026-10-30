@@ -360,3 +360,19 @@ self-consistent check at `N=100/150` with the physical tolerances.
   optimization: fix the contour/Matsubara momenta during the μ bisection and
   cache the direct G per (l, momentum), which removes the ~40x repeated
   radial integrations.
+
+### Final M2.5 integration numbers (2026-10-30)
+
+- `density_method = :direct_green` default; `mu_tolerance` kept at `1e-10`
+  (absolute, Hartree) after discussion.
+- The μ solver is a safeguarded secant (bracket fallback), reducing the μ
+  evaluations from ~24 to ~5-8.
+- `average_atom(5, 10, 10, 0.2; l_max=10, direct_grid_points=1000)`:
+  - `N=50`: 17 iterations, ~48 s including compilation,
+  - `N=100`: 17 iterations, ~59 s,
+  - `μ = 50.24700` eV at both N, `V_eff(R) ~ 1e-10`, `nmin > 0`.
+- `just test average_atom`: all tests pass, including the M2 self-consistency
+  (`residV ~9e-5`, neutrality residual `~3e-15`), the M2.5 direct-vs-Siegert
+  check (`relL2 ~1e-5`), and the M1 tests (the Siegert basis-convergence test
+  now selects `density_method=:siegert`).
+- Default direct grid: `direct_grid_points=1000`, `direct_grid_power=2`.
