@@ -171,20 +171,44 @@ M2.5b (the `l > l_max` free correction) and M2.5c (mixing/acceleration) cannot
 fix a high-`k` normalization failure inside each `l <= l_max`. Proceeding with
 them as written would not address the observed `N=100/150` garbage.
 
+### B1 diagnostic (2026-10-30)
+
+B1 was "use BT07 Eq. (36) in the DVR basis, or evaluate the normalization in
+higher precision, to reduce the near-null amplification". A direct test rules
+this out: for the smallest-norm state at `N=100` (same fixed `N=50` potential),
+`l=10`, `k = 2.52e-9 - 645.46i`,
+
+- `|norm_f64| = 5.263865e-16`, `|norm_big| = 5.263862e-16` from the same
+  Float64 eigenvector,
+- relative difference `6.1e-7`,
+- `interior ~ 3.21e-6`, `|surface| ~ 1.0`, `|P| ~ 0.064`, and the two `3.2e-6`
+  terms cancel to `5e-16` (about 10 digits).
+
+The normalization *evaluation* is already accurate. The tiny norm is genuine,
+and the loss comes from the Float64 eigenvector plus the intrinsic
+cancellation. B1 (DVR form or higher-precision normalization only) is ruled
+out.
+
+Remaining B variant: biorthogonal/left-eigenvector normalization. The idea is
+to pair each right eigenvector with its left partner and use the
+biorthogonal denominator (which may be `O(1)`) instead of the tiny self-norm.
+This is research-level (1-2 weeks), because the physical Green's function must
+be re-derived in the extended space and validated against the existing M1
+tests; the physical projection is still tiny, so success is not guaranteed.
+
 Options:
 
 - A. Accept the `N ~ 50` limitation and close M2.5 with this diagnosis (M2 as
   committed, plus the contour-panel note).
-- B. Try a targeted normalization change before a full rewrite: compute the
-  SPS normalization from BT07 Eq. (36) in the DVR basis, or use the
-  biorthogonal/left-eigenvector normalization, and re-measure the high-`k`
-  cancellation. M1-level but smaller than a resolvent rewrite.
+- B. B2 (biorthogonal/left-eigenvector normalization) as a bounded research
+  spike. Expected 1-2 weeks; uncertain.
 - C. M1.5: S15-style direct regular/irregular Green function or a Siegert
   resolvent, which avoids the near-null eigenvector normalization entirely.
 - D. Proceed with M2.5b/M2.5c anyway (expected not to fix the root cause).
 
-Recommendation: B as a bounded spike, then C if B fails. Do not proceed to
-M2.5b/c as written without a decision.
+Recommendation: B2 only if the user wants to keep the Siegert spectral sum;
+otherwise C is the more reliable reformulation. A remains valid given the
+`N ~ 50` practical range.
 
 ## Confirmed
 
