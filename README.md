@@ -33,7 +33,7 @@ Bohr.
 - Density of states from the Green's function
   (SS23 Eqs. (16)-(17)).
 
-### Fixed-potential average-atom density (M1)
+### Fixed-potential average-atom density
 
 - Continuum density from the upper-half-plane contour plus the enclosed
   Matsubara poles (SS23 Eq. (13); S15 Eq. (16) and Appendix B).
@@ -44,10 +44,10 @@ Bohr.
   with the density, `μ`, states, common grid, neutrality residual, and contour
   metadata.
 
-M1 does **not** update the effective potential. It is the fixed-potential
-input for the self-consistent M2 loop.
+The fixed-potential layer does **not** update the effective potential. It is
+the input for the self-consistent loop.
 
-### Self-consistent average atom (M2)
+### Self-consistent average atom
 
 - Fixed-point iteration of
   \(V_{\rm eff} = -Z/r + V_H + V_{\rm xc}[n] - V_{\rm xc}[n(R)]\)
@@ -56,7 +56,7 @@ input for the self-consistent M2 loop.
   (`density_method = :direct_green`): the regular/irregular radial solutions
   are integrated at each contour/Matsubara momentum, so the density does not
   use the near-null high-\(k\) Siegert pseudostates. `density_method =
-  :siegert` keeps the M1 contour + Matsubara spectral sum.
+  :siegert` keeps the contour + Matsubara spectral sum.
 - Pluggable exchange-correlation through `xc = nothing` (zero XC), `xc =
   :ksdt` (corrKSDT finite-temperature LDA), an `AbstractXC` model, or a raw
   callable `xc(n, r) -> V_xc[n](r)`; the driver applies the `n(R)`
@@ -69,7 +69,7 @@ input for the self-consistent M2 loop.
   Eqs. (13)/(14)); the direct backend always adds the analytic free tail for
   \(l > l_{\max}\).
 
-### Finite-temperature XC and thermodynamics (M3)
+### Finite-temperature XC and thermodynamics
 
 - corrKSDT unpolarized finite-temperature LDA for both `V_xc` and the XC free
   energy (Karasiev-Dufty-Trickey, with the corrected coefficients from libxc
@@ -181,24 +181,19 @@ References:
 - Non-relativistic, spherical, single-channel, integer `l`.
 - Off-diagonal Green's function \(G_l(r,r';k)\) for \(r\ne r'\) is not exposed.
 
-## Roadmap
+## Validation
 
-### M2: self-consistent average atom
+The SS23 figure comparison and the low-temperature Al/Na/Fe checks live in
+`test/validation/ss23.jl`:
 
-- Implemented: `V_eff` from `-Z/r`, the Hartree potential, and a pluggable
-  `V_xc`; fixed-point iteration; `average_atom(Z, A, rho_m, T)` with eV and
-  g/cm^3 conversions; optional free-electron subtraction.
-- Remaining M1-level work: a better-conditioned density evaluation for larger
-  bases (S15-style direct Green function or a Siegert resolvent formulation).
+```bash
+julia --project test/validation/ss23.jl        # SS23 Figs. 1-6 subset
+julia --project test/validation/ss23.jl lowt   # low-temperature cases
+julia --project test/validation/ss23.jl all    # both
+```
 
-### M3: exchange-correlation, pressure, and equation of state
-
-- Implemented: corrKSDT finite-temperature XC; `thermodynamics` with free
-  energy, internal energy, entropy, pressure, and their decomposition;
-  direct-G/Siegert DOS; SS23 Figs. 1-6 subset; low-temperature Al/Na/Fe cases.
-- Validation: `julia --project test/validation/m3.jl` (Figs. 1-6) and
-  `julia --project test/validation/m3.jl lowt` (low-temperature cases).
-- Remaining: the `:siegert` `N = 150` density repair is a separate milestone.
+The full unit test suite and formatting check are run with `just test` and
+`treefmt -c`.
 
 ## Development
 

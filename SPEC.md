@@ -272,10 +272,10 @@ Acceptance criteria:
 - [ ] SS23 Figs. 1-6 subset agrees qualitatively (DOS peaks, `V_eff` shape,
       eigenvalue tracks) and Fig. 6 quantitatively within a few percent or
       visually within the figure resolution.
-      verify: `julia --project test/validation/m3.jl`
+      verify: `julia --project test/validation/ss23.jl`
 - [ ] The low-temperature Al/Na/Fe cases converge and satisfy the DOS
       neutrality/positivity criteria.
-      verify: `julia --project test/validation/m3.jl lowt`
+      verify: `julia --project test/validation/ss23.jl lowt`
 - [ ] Formatting and the full test suite pass.
       verify: `treefmt -c && just test`
 
@@ -297,7 +297,7 @@ inconclusive; a validation case needs a condition outside the model
 
 `src/xc.jl` (new), `src/average_atom.jl`, `src/Siegert.jl`,
 `test/test_xc.jl` (new), `test/test_thermodynamics.jl` (new),
-`test/test_average_atom.jl`, `test/validation/m3.jl` (new), `README.md`,
+`test/test_average_atom.jl`, `test/validation/ss23.jl` (new), `README.md`,
 `Project.toml` (test-only ForwardDiff), `SPEC.md`, `ISSUE.md`.
 
 ## Decisions

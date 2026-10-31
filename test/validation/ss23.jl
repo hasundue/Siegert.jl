@@ -1,9 +1,9 @@
-# M3c validation: SS23 figures 1-6 and the low-temperature Al/Na/Fe cases.
+# Validation: SS23 figures 1-6 and the low-temperature Al/Na/Fe cases.
 #
 # Usage:
-#   julia --project test/validation/m3.jl          # SS23 Figs. 1-6 subset
-#   julia --project test/validation/m3.jl lowt     # low-temperature cases
-#   julia --project test/validation/m3.jl all      # both
+#   julia --project test/validation/ss23.jl        # SS23 Figs. 1-6 subset
+#   julia --project test/validation/ss23.jl lowt   # low-temperature cases
+#   julia --project test/validation/ss23.jl all    # both
 #
 # The pressure in SS23 Fig. 6 is the Tartarus continuum/free-electron pressure
 # (bound states excluded from the pressure virial). The reference values below
@@ -346,5 +346,5 @@ elseif ARGS == ["all"]
     validate_ss23()
     validate_lowt()
 else
-    error("usage: julia --project test/validation/m3.jl [lowt|all]")
+    error("usage: julia --project test/validation/ss23.jl [lowt|all]")
 end
