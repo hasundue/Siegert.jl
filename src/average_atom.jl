@@ -550,8 +550,27 @@ function _free_partial_density(r, μ, T, l, contour, n_vert, n_horiz, n_return)
     return density
 end
 
-# ---------------------------------------------------------------------------
-# S15-style direct Green function (density backend).
+# Physical free partial density from the real-axis partial-wave expansion:
+#   n_l(r) = [2(2l+1)/(4π)] (2/π) ∫ dk k² f(k²/2) j_l(kr)².
+# This is the same l-partial convention as the real-axis free partial DOS.
+function _free_partial_density_real(r, μ, T, l; panels::Integer = 200)
+    kmax = sqrt(2 * (max(0.0, Float64(μ)) + 60T))
+    nodes, weights = gauss_legendre4()
+    integral = zeros(Float64, length(r))
+    for panel = 1:panels
+        a = (panel - 1) / panels * kmax
+        b = panel / panels * kmax
+        half = (b - a) / 2
+        center = (a + b) / 2
+        for q = 1:4
+            k = center + half * nodes[q]
+            w = half * weights[q]
+            f = fermi_dirac(k^2 / 2, μ, T)
+            integral .+= w * k^2 * f .* _spherical_j(l, k .* r) .^ 2
+        end
+    end
+    return (2 * (2l + 1) / (4π)) * (2 / π) * integral
+end
 #
 # The Siegert spectral sum uses all 2N+l pseudostates and divides by the
 # near-null physical norms; at large N this loses Float64 accuracy. The direct
@@ -1045,11 +1064,13 @@ function _direct_potential_density(
             n_horiz = n_horiz,
             n_return = n_return,
         )
-        # Replace the tail l > l_max by the free-electron tail.
+        # Replace the tail l > l_max by the physical free-electron tail
+        # n_free - sum n_free,l. The real-axis free partial density is used so
+        # the density tail and the thermodynamic DOS share the same l-partial
+        # convention.
         free_tail = fill(free_electron_density(mu, T), length(r))
         for l = 0:l_max
-            free_tail .-=
-                _free_partial_density(r, mu, T, l, contour, n_vert, n_horiz, n_return)
+            free_tail .-= _free_partial_density_real(r, mu, T, l)
         end
         density = bound .+ continuum .+ free_tail
         electron_number = 4π * sum(volume .* density)
@@ -1269,6 +1290,10 @@ Fields:
 - `states`: Normalized Siegert states for each angular momentum
 - `grid`: Common radial grid in Bohr (the l = 0 Gauss-Radau grid)
 - `contour`: Contour parameters used for the final density
+- `nuclear_charge`: Nuclear charge `Z`
+- `xc`: Exchange-correlation model used in the SCF
+- `density_method`: Density backend, `:direct_green` or `:siegert`
+- `direct_grid_points`, `direct_grid_power`: Direct-G integration grid parameters
 """
 struct AverageAtomResult
     density::Vector{Float64}
@@ -1283,6 +1308,11 @@ struct AverageAtomResult
     states::Vector{NormalizedSPS}
     grid::Vector{Float64}
     contour::Contour
+    nuclear_charge::Float64
+    xc::AbstractXC
+    density_method::Symbol
+    direct_grid_points::Int
+    direct_grid_power::Float64
 end
 
 """
@@ -1307,9 +1337,9 @@ function _average_atom_bohr(
     E_min::Real = 0.0,
     E_max::Union{Nothing,Real} = nothing,
     E_I::Union{Nothing,Real} = nothing,
-    n_vert::Integer = 1,
-    n_horiz::Integer = 20,
-    n_return::Integer = 20,
+    n_vert::Integer = 2,
+    n_horiz::Integer = 80,
+    n_return::Integer = 80,
     bound_tolerance::Real = 1e-8,
     mu_tolerance::Real = 1e-10,
 )
@@ -1321,6 +1351,7 @@ function _average_atom_bohr(
     0 < mixing <= 1 || throw(ArgumentError("mixing must lie in (0, 1]"))
     max_iterations > 0 || throw(ArgumentError("max_iterations must be positive"))
     scf_tolerance > 0 || throw(ArgumentError("scf_tolerance must be positive"))
+    xc_model = _as_xc(xc)
 
     dvr0 = DVR(N, 0)
     setup = _dvr_interpolation_setup(dvr0)
@@ -1361,7 +1392,7 @@ function _average_atom_bohr(
         )
         mu_guess = aa.chemical_potential
         V_H = _hartree_potential(aa.density, dvr0, R)
-        xc_values = xc === nothing ? zeros(length(r)) : xc(aa.density, r)
+        xc_values = xc_potential(xc_model, aa.density, r, T)
         length(xc_values) == length(r) ||
             throw(DimensionMismatch("xc must return one value per grid point"))
         xc_values = Float64.(xc_values)
@@ -1396,6 +1427,11 @@ function _average_atom_bohr(
         aa.states,
         aa.grid,
         aa.contour,
+        Float64(Z),
+        xc_model,
+        density_method,
+        direct_grid_points,
+        direct_grid_power,
     )
 end
 
@@ -1418,8 +1454,10 @@ sum. `xc = nothing` means zero exchange-correlation.
 
 `xc` may be a callable `xc(n::AbstractVector, r::AbstractVector)` returning the
 unsubtracted `V_xc[n](r)` on the grid; the boundary subtraction is applied by
-the driver. Density is returned in bohr^-3, potential in Hartree, and
-`chemical_potential_eV` in eV.
+the driver. It may also be an [`AbstractXC`](@ref) model, `:ksdt` for
+[`KSDT`](@ref), or `nothing` for [`NoXC`](@ref). A raw callable is
+potential-only and cannot be used with [`thermodynamics`](@ref). Density is
+returned in bohr^-3, potential in Hartree, and `chemical_potential_eV` in eV.
 
 `free_electron_subtraction = true` is a `:siegert`-backend option: it evaluates
 each partial wave as `n_l - n_l^free` and adds the analytic uniform free
@@ -1461,9 +1499,9 @@ function average_atom(
     E_min::Real = 0.0,
     E_max::Union{Nothing,Real} = nothing,
     E_I::Union{Nothing,Real} = nothing,
-    n_vert::Integer = 1,
-    n_horiz::Integer = 20,
-    n_return::Integer = 20,
+    n_vert::Integer = 2,
+    n_horiz::Integer = 80,
+    n_return::Integer = 80,
     bound_tolerance::Real = 1e-8,
     mu_tolerance::Real = 1e-10,
 )
@@ -1492,5 +1530,435 @@ function average_atom(
         n_return = n_return,
         bound_tolerance = bound_tolerance,
         mu_tolerance = mu_tolerance,
+    )
+end
+
+# ---------------------------------------------------------------------------
+# M3: thermodynamic DOS and equation-of-state observables.
+#
+# References
+# - C. E. Starrett, N. M. Gill, T. Sjostrom, and C. W. Greeff, "Wide ranging
+#   equation of state with Tartarus," Comput. Phys. Commun. 235, 50-62 (2019).
+#   doi:10.1016/j.cpc.2018.10.002 [Tartarus]
+# - C. E. Starrett and N. R. Shaffer, "Average Atom Model with Siegert States,"
+#   Phys. Rev. E 107, 025204 (2023). doi:10.1103/PhysRevE.107.025204 [SS23]
+
+"""
+Thermodynamic observables of a self-consistent average atom, per atom unless
+noted otherwise.
+
+Fields (internal Hartree/Bohr units):
+- `free_energy`, `internal_energy`: Ha/atom
+- `entropy`: Ha/K/atom
+- `electron_pressure`, `ion_ideal_pressure`, `total_pressure`: Ha/bohr^3.
+  `electron_pressure` is the Tartarus continuum/free-electron pressure: bound
+  states are excluded from the pressure virial.
+- `free_energy_electrostatic`, `free_energy_xc`: Ha/atom
+- `internal_energy_kinetic`: Ha/atom, the all-state `U_k` used in `F` and `U`
+- `entropy_ks`, `entropy_xc`: Ha/K/atom
+- `pressure_xc`: Ha/bohr^3, the XC virial diagnostic used by the literal
+  all-state virial sum
+
+Convenience properties: `free_energy_eV`, `internal_energy_eV` (eV/atom),
+`entropy_kB` (`k_B`/atom), `electron_pressure_GPa`, `total_pressure_GPa`.
+"""
+struct ThermodynamicProperties
+    free_energy::Float64
+    internal_energy::Float64
+    entropy::Float64
+    electron_pressure::Float64
+    ion_ideal_pressure::Float64
+    total_pressure::Float64
+    free_energy_electrostatic::Float64
+    free_energy_xc::Float64
+    internal_energy_kinetic::Float64
+    entropy_ks::Float64
+    entropy_xc::Float64
+    pressure_xc::Float64
+end
+
+function Base.getproperty(t::ThermodynamicProperties, name::Symbol)
+    if name === :free_energy_eV
+        return getfield(t, :free_energy) * HARTREE_TO_EV
+    elseif name === :internal_energy_eV
+        return getfield(t, :internal_energy) * HARTREE_TO_EV
+    elseif name === :entropy_kB
+        return getfield(t, :entropy) / KB_HARTREE_PER_K
+    elseif name === :electron_pressure_GPa
+        return getfield(t, :electron_pressure) * HARTREE_PER_BOHR3_TO_GPA
+    elseif name === :total_pressure_GPa
+        return getfield(t, :total_pressure) * HARTREE_PER_BOHR3_TO_GPA
+    else
+        return getfield(t, name)
+    end
+end
+
+function Base.propertynames(t::ThermodynamicProperties, private::Bool = false)
+    return (
+        fieldnames(ThermodynamicProperties)...,
+        :free_energy_eV,
+        :internal_energy_eV,
+        :entropy_kB,
+        :electron_pressure_GPa,
+        :total_pressure_GPa,
+    )
+end
+
+# Bound-state contributions to the DOS: `(energy, weight)` with the nominal
+# degeneracy `2(2l+1)` times the volume norm of the Siegert state. A bound
+# Siegert state is normalized with the surface term of Eq. (6); its volume norm
+# is not exactly one in a finite basis. Using the actual norm keeps the bound
+# DOS contribution equal to the bound density used by the SCF.
+function _bound_dos(
+    aa::AverageAtomResult;
+    bound_tolerance::Real = 1e-8,
+    E_min::Real = aa.contour.E_min,
+)
+    terms = Tuple{Float64,Float64}[]
+    r = aa.grid
+    dr = _dr_weights(aa)
+    for nsps in aa.states
+        l = angular_momentum(nsps)
+        P = siegert_wavefunction(nsps, r)
+        for (i, k) in enumerate(momenta(nsps))
+            _is_bound_state(k, bound_tolerance) || continue
+            ε = real(k^2) / 2
+            ε < E_min || continue
+            volume_norm = sum(dr .* real.(P[:, i] .^ 2))
+            push!(terms, (Float64(ε), Float64(2 * (2l + 1) * volume_norm)))
+        end
+    end
+    return terms
+end
+
+# Free partial DOS per unit energy, including the spin factor 2(2l+1). The
+# caller supplies the radial grid and dr weights; the average-atom DVR grid is
+# used so this tail is integrated consistently with the density tail.
+function _free_partial_dos(k::Real, l::Integer, R::Real, r::AbstractVector, weights)
+    G = -2im * k .* (r .^ 2) .* _spherical_j(l, k .* r) .* _spherical_h1(l, k .* r)
+    return -(1 / π) * imag(2 * (2l + 1) * sum(weights .* G))
+end
+
+function _free_partial_dos_sum(k::Real, l_max::Integer, R::Real, r, weights)
+    return sum(_free_partial_dos(k, l, R, r, weights) for l = 0:l_max)
+end
+
+function _free_tail_dos(k::Real, l_max::Integer, R::Real, r, weights)
+    volume = 4π * R^3 / 3
+    return volume * k / π^2 - _free_partial_dos_sum(k, l_max, R, r, weights)
+end
+
+# Cached radial setup for the direct-G DOS on the real energy axis.
+struct _DirectDOSSetup
+    r::Vector{Float64}
+    weights::Vector{Float64}
+    R::Float64
+    l_max::Int
+    fwd::Vector{Float64}
+    bwd::Vector{Float64}
+    Vf::Vector{Float64}
+    Vb::Vector{Float64}
+    idxP::Vector{Int}
+    wtsP::Vector{Float64}
+    idxI::Vector{Int}
+    wtsI::Vector{Float64}
+end
+
+function _direct_dos_setup(aa::AverageAtomResult)
+    R = aa.radius_bohr
+    Z = aa.nuclear_charge
+    N = length(aa.grid)
+    dvr = DVR(N, 0)
+    setup = _dvr_interpolation_setup(dvr)
+    r = aa.grid
+    weights = (R / 2) .* dvr.weights
+    W = [aa.potential[i] + Z / r[i] for i in eachindex(r)]
+    V = _effective_potential(W, setup, R, Z)
+    fwd = _power_grid(R, aa.direct_grid_points, aa.direct_grid_power)
+    bwd = reverse(fwd)
+    Vf = [V(x) for x in fwd]
+    Vb = [V(x) for x in bwd]
+    idxP, wtsP = _prepare_interpolation(fwd, r)
+    idxI, wtsI = _prepare_interpolation(reverse(bwd), r)
+    return _DirectDOSSetup(
+        r,
+        weights,
+        R,
+        length(aa.states) - 1,
+        fwd,
+        bwd,
+        Vf,
+        Vb,
+        idxP,
+        wtsP,
+        idxI,
+        wtsI,
+    )
+end
+
+function _direct_partial_dos(k::Real, l::Integer, setup::_DirectDOSSetup)
+    G =
+        -im * k .* _direct_green_partial(
+            k,
+            l,
+            setup.R,
+            setup.Vf,
+            setup.Vb,
+            setup.fwd,
+            setup.bwd,
+            setup.idxP,
+            setup.wtsP,
+            setup.idxI,
+            setup.wtsI,
+        )
+    return -(1 / π) * imag(2 * (2l + 1) * DIRECT_G_PREFACTOR * sum(setup.weights .* G))
+end
+
+function _direct_continuum_dos(k::Real, setup::_DirectDOSSetup)
+    return sum(_direct_partial_dos(k, l, setup) for l = 0:setup.l_max)
+end
+
+# Continuum DOS per unit energy at ε >= E_min. `free_setup` is a tuple
+# `(r, weights, R)` for the analytic free-tail integral.
+function _continuum_dos(
+    aa::AverageAtomResult,
+    ε::Real,
+    direct_setup::Union{Nothing,_DirectDOSSetup},
+    free_setup,
+    l_max::Integer;
+    bound_tolerance::Real = 1e-8,
+)
+    ε > aa.contour.E_min || return 0.0
+    k = sqrt(2ε)
+    if aa.density_method === :direct_green
+        direct_setup === nothing &&
+            throw(ArgumentError("direct-G DOS setup is missing for :direct_green"))
+        χ = _direct_continuum_dos(k, direct_setup)
+    elseif aa.density_method === :siegert
+        χ = siegert_dos(aa.states, k; r = aa.grid, weights = _dr_weights(aa))
+    else
+        throw(ArgumentError("unknown density_method $(aa.density_method)"))
+    end
+    r_free, w_free, R = free_setup
+    return χ + _free_tail_dos(k, l_max, R, r_free, w_free)
+end
+
+function _dr_weights(aa::AverageAtomResult)
+    dvr = DVR(length(aa.grid), 0)
+    return (aa.radius_bohr / 2) .* dvr.weights
+end
+
+# Stable entropy per particle in units of k_B:
+#   s = -[f ln f + (1-f) ln(1-f)].
+function _fermi_entropy(f::Real)
+    if f <= 0
+        return 0.0
+    elseif f >= 1
+        return 0.0
+    elseif f < 0.5
+        return -f * log(f) - (1 - f) * log1p(-f)
+    else
+        g = 1 - f
+        return -f * log(f) - g * log(g)
+    end
+end
+
+const _GL4_NODES =
+    (-0.8611363115940526, -0.3399810435848563, 0.3399810435848563, 0.8611363115940526)
+const _GL4_WEIGHTS =
+    (0.3478548451374538, 0.6521451548625461, 0.6521451548625461, 0.3478548451374538)
+
+# Panel + 4-point Gauss-Legendre quadrature on [a,b]. Extra panels are placed
+# around the Fermi edge μ ± 10T so the occupation transition is resolved.
+function _energy_quadrature(a::Real, b::Real, μ::Real, T::Real)
+    a < b || return Float64[], Float64[]
+    breakpoints = Float64[a]
+    for x in (μ - 10T, μ, μ + 10T)
+        a < x < b && push!(breakpoints, Float64(x))
+    end
+    push!(breakpoints, Float64(b))
+    sort!(breakpoints)
+    unique!(breakpoints)
+
+    points = Float64[]
+    weights = Float64[]
+    for i = 1:(length(breakpoints)-1)
+        lo = breakpoints[i]
+        hi = breakpoints[i+1]
+        hi > lo || continue
+        width = hi - lo
+        central = hi > μ - 10T && lo < μ + 10T
+        panels = if central
+            max(80, min(400, ceil(Int, 10 * width / T)))
+        else
+            max(40, min(200, ceil(Int, 5 * width / T)))
+        end
+        half = width / (2 * panels)
+        for p = 1:panels
+            center = lo + (2p - 1) * half
+            for q = 1:4
+                ε = center + half * _GL4_NODES[q]
+                push!(points, ε)
+                push!(weights, half * _GL4_WEIGHTS[q])
+            end
+        end
+    end
+    return points, weights
+end
+
+"""
+    thermodynamics(aa::AverageAtomResult; bound_tolerance=1e-8,
+                   dos_cutoff=1e-10, E_min=aa.contour.E_min)
+        -> ThermodynamicProperties
+
+Compute the Tartarus finite-temperature observables from the converged
+average-atom density, potential, and DOS. Returns per-atom free energy and
+internal energy (Ha), entropy (Ha/K), and electron/ion/total pressure
+(Ha/bohr^3), with the decomposition into electrostatic, kinetic, and
+exchange-correlation terms.
+
+The pressure uses the Tartarus continuum/free-electron decomposition,
+`P_e = 2 U_k^continuum / (3V)`: bound states are retained in the density and in
+`F`/`U`, but their core kinetic pressure is not part of the electron pressure.
+The literal all-state virial expression can be reconstructed from
+`internal_energy_kinetic`, `free_energy_electrostatic`, and `pressure_xc`; the
+validation script reports the difference.
+
+The XC model must provide a free energy (`xc_free_energy`); a potential-only
+model throws `ArgumentError`. The continuum DOS is the Siegert DOS for the
+`:siegert` backend and the direct-G DOS for the `:direct_green` backend. The
+`l > l_max` tail is the analytic free partial DOS. The entropy integration is
+on the real energy axis; the occupation cutoff is chosen so
+`f ≈ dos_cutoff` above `μ`.
+
+The identity `F = U - T_Ha*(S_ks + S_xc)/k_B` holds by construction, where
+`S_ks` and `S_xc` are stored in Ha/K and `T_Ha = k_B T_K`.
+
+# Example
+```julia
+aa = average_atom(13.0, 27.0, 2.7, 10.0; xc = :ksdt)
+th = thermodynamics(aa)
+th.free_energy_eV
+th.entropy_kB
+th.electron_pressure_GPa
+```
+"""
+function thermodynamics(
+    aa::AverageAtomResult;
+    bound_tolerance::Real = 1e-8,
+    dos_cutoff::Real = 1e-10,
+    E_min::Real = aa.contour.E_min,
+)
+    0 < dos_cutoff < 1 || throw(ArgumentError("dos_cutoff must lie in (0, 1)"))
+    T_Ha = aa.temperature_eV / HARTREE_TO_EV
+    T_Ha > 0 || throw(ArgumentError("temperature must be positive"))
+    R = aa.radius_bohr
+    V = 4π * R^3 / 3
+    r = aa.grid
+    dr = _dr_weights(aa)
+    volume_weights = 4π .* (r .^ 2) .* dr
+    μ = aa.chemical_potential_eV / HARTREE_TO_EV
+
+    xc_thermo = _xc_thermo(aa.xc, aa.density, T_Ha)
+    xc_thermo === nothing && throw(
+        ArgumentError(
+            "thermodynamics requires a free-energy XC model; " *
+            "$(typeof(aa.xc)) is potential-only",
+        ),
+    )
+    f_xc, f_t_xc, T_F = xc_thermo
+
+    # Electrostatic and kinetic terms.
+    dvr0 = DVR(length(r), 0)
+    V_H = _hartree_potential(aa.density, dvr0, R)
+    F_el = 0.5 * sum(volume_weights .* V_H .* aa.density)
+    V_eff_n = sum(volume_weights .* aa.potential .* aa.density)
+
+    # Bound-state contributions to N, U_kin, and S_ks.
+    bound = _bound_dos(aa; bound_tolerance = bound_tolerance, E_min = E_min)
+    N_bound = 0.0
+    U_kin_bound = 0.0
+    S_ks_dimless = 0.0
+    for (ε, weight) in bound
+        f = fermi_dirac(ε, μ, T_Ha)
+        N_bound += weight * f
+        U_kin_bound += weight * f * ε
+        S_ks_dimless += weight * _fermi_entropy(f)
+    end
+
+    # Continuum contributions. The free-tail DOS uses the same DVR radial
+    # grid and weights as the density tail, so the two l-partial conventions
+    # are integrated consistently.
+    free_setup = (r, dr, R)
+    direct_setup = aa.density_method === :direct_green ? _direct_dos_setup(aa) : nothing
+    l_max = length(aa.states) - 1
+    E_low = Float64(E_min)
+    E_high = μ + T_Ha * log(1 / dos_cutoff - 1)
+    N_continuum = 0.0
+    U_kin_continuum = 0.0
+    S_ks_continuum = 0.0
+    if E_high > E_low
+        points, measures = _energy_quadrature(E_low, E_high, μ, T_Ha)
+        for (ε, w) in zip(points, measures)
+            χ = _continuum_dos(
+                aa,
+                ε,
+                direct_setup,
+                free_setup,
+                l_max;
+                bound_tolerance = bound_tolerance,
+            )
+            f = fermi_dirac(ε, μ, T_Ha)
+            N_continuum += w * f * χ
+            U_kin_continuum += w * f * χ * ε
+            S_ks_continuum += w * _fermi_entropy(f) * χ
+        end
+    end
+
+    U_k = U_kin_bound + U_kin_continuum - V_eff_n
+    S_ks_dimless += S_ks_continuum
+    S_ks = KB_HARTREE_PER_K * S_ks_dimless
+    F_ks = U_k - T_Ha * S_ks_dimless
+
+    # XC terms. For NoXC, f_t_xc and T_F are zero arrays/nothing.
+    F_xc = sum(volume_weights .* aa.density .* f_xc)
+    if T_F === nothing
+        U_xc = F_xc
+        S_xc_dimless = 0.0
+    else
+        t_xc = T_Ha ./ T_F
+        U_xc = sum(volume_weights .* aa.density .* (f_xc .- t_xc .* f_t_xc))
+        S_xc_dimless = sum(volume_weights .* aa.density .* (-f_t_xc ./ T_F))
+    end
+    S_xc = KB_HARTREE_PER_K * S_xc_dimless
+    V_xc = xc_potential(aa.xc, aa.density, r, T_Ha)
+    P_xc = (-F_xc + sum(volume_weights .* aa.density .* V_xc)) / V
+
+    F = F_el + F_xc + F_ks
+    U = F_el + U_xc + U_k
+    S = S_ks + S_xc
+    # Tartarus uses the continuum/free-electron decomposition for the pressure
+    # virial. Bound states are kept in the density and in F/U, but their core
+    # kinetic pressure is not part of the electron pressure; it is canceled by
+    # the nuclear virial in the continuum/free decomposition.
+    P_e = 2 * U_kin_continuum / (3V)
+    P_ion = T_Ha / V
+    P_tot = P_e + P_ion
+
+    # N_dos is available for the neutrality check in tests; keep it out of the
+    # public struct to avoid committing to a field name before M3c.
+    return ThermodynamicProperties(
+        F,
+        U,
+        S,
+        P_e,
+        P_ion,
+        P_tot,
+        F_el,
+        F_xc,
+        U_k,
+        S_ks,
+        S_xc,
+        P_xc,
     )
 end
