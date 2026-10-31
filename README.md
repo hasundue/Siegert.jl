@@ -57,8 +57,10 @@ input for the self-consistent M2 loop.
   are integrated at each contour/Matsubara momentum, so the density does not
   use the near-null high-\(k\) Siegert pseudostates. `density_method =
   :siegert` keeps the M1 contour + Matsubara spectral sum.
-- Pluggable exchange-correlation through `xc = nothing` or a callable
-  `xc(n, r) -> V_xc[n](r)`; the driver applies the `n(R)` subtraction.
+- Pluggable exchange-correlation through `xc = nothing` (zero XC), `xc =
+  :ksdt` (corrKSDT finite-temperature LDA), an `AbstractXC` model, or a raw
+  callable `xc(n, r) -> V_xc[n](r)`; the driver applies the `n(R)`
+  subtraction.
 - `average_atom(Z, A, rho_m, T)` accepts `T` in eV, `rho_m` in g/cm^3, and
   `A` in atomic mass units, and returns an `AverageAtomResult` with the
   density, potential, `μ` in eV, neutrality and self-consistency residuals,
@@ -66,6 +68,23 @@ input for the self-consistent M2 loop.
 - The `:siegert` backend supports free-electron subtraction (S15
   Eqs. (13)/(14)); the direct backend always adds the analytic free tail for
   \(l > l_{\max}\).
+
+### Finite-temperature XC and thermodynamics (M3)
+
+- corrKSDT unpolarized finite-temperature LDA for both `V_xc` and the XC free
+  energy (Karasiev-Dufty-Trickey, with the corrected coefficients from libxc
+  `LDA_XC_CORRKSDT`).
+- Analytic `f_rs`, `f_t`, and `V_xc = f + n df/dn`, checked against ForwardDiff
+  and libxc reference values.
+- `thermodynamics(aa)` returns `ThermodynamicProperties`: free energy,
+  internal energy, entropy, and electron/ion/total pressure, decomposed into
+  electrostatic, kinetic, and XC terms.
+- The pressure uses the Tartarus continuum/free-electron decomposition:
+  bound/core states stay in the density and in `F`/`U`, but they are excluded
+  from the pressure virial. The literal all-state virial is available as a
+  diagnostic through the decomposition fields.
+- DOS construction uses bound states below `E_min`, a real-axis continuum
+  integral, and the analytic free tail for \(l > l_{\max}\).
 
 ## Usage
 
@@ -94,6 +113,15 @@ aa2 = average_atom(5.0, 10.0, 10.0, 0.2; N = 50, l_max = 10)
 aa2.converged
 aa2.chemical_potential_eV
 aa2.self_consistency_residual
+
+# Finite-temperature XC and equation of state
+aa3 = average_atom(13.0, 27.0, 2.7, 10.0; xc = :ksdt)
+th = thermodynamics(aa3)
+th.free_energy_eV
+th.internal_energy_eV
+th.entropy_kB
+th.electron_pressure_GPa
+th.total_pressure_GPa
 ```
 
 SPS states are raw by default for scattering-only use. The AA layer wraps them
@@ -114,6 +142,8 @@ G = siegert_green(nsps, 0.5)
 | BT07, Phys. Rev. A **75**, 062704 (2007) | Nonzero-`l` DVR/SPS, normalization Eq. (37), Green's function Eq. (73), product formula Eq. (85) |
 | SS23, Phys. Rev. E **107**, 025204 (2023) | Eq. (6) normalization, Eq. (9) Green's function, Eqs. (16)-(17) DOS, Eq. (11) `V_eff`, Eq. (13) contour + Matsubara density |
 | S15, High Energy Density Phys. **16**, 18 (2015) | Green's-function AA formulation, Jülich regular/irregular solutions, direct Green function Eqs. (13)/(14), free-electron subtraction, Appendix A matching, Appendix B contour construction |
+| KSDT14/corrKSDT, PRL **112**, 076403 (2014); PRL **120**, 076401 (2018) | Finite-temperature corrKSDT unpolarized LDA `f_xc`, `V_xc`, entropy, and pressure |
+| Tartarus, Comput. Phys. Commun. **235**, 50 (2019) | Thermodynamic observables, DOS construction, continuum/free-electron pressure decomposition |
 
 References:
 
@@ -142,8 +172,12 @@ References:
 - The direct backend's self-consistency threshold is `1e-4` Ha (the physical
   target); the μ solve is a safeguarded secant with `mu_tolerance = 1e-10`
   Ha absolute.
-- No exchange-correlation model beyond the pluggable interface, and no
-  pressure, entropy, free energy, or equation of state.
+- The pressure is the Tartarus continuum/free-electron pressure; the literal
+  all-state virial differs strongly at low temperature because it retains the
+  bound/core kinetic term.
+- Low-temperature (`T ~ 0.1 eV`) Al/Na DOS neutrality is limited to about
+  `1e-5` relative by near-threshold anti-bound states; the SS23 reference cases
+  meet `1e-6`.
 - Non-relativistic, spherical, single-channel, integer `l`.
 - Off-diagonal Green's function \(G_l(r,r';k)\) for \(r\ne r'\) is not exposed.
 
@@ -159,9 +193,12 @@ References:
 
 ### M3: exchange-correlation, pressure, and equation of state
 
-- Finite-temperature KSDT exchange-correlation.
-- Pressure, entropy, free energy, and equation-of-state observables.
-- Comparison with the SS23 figures and with Tartarus.
+- Implemented: corrKSDT finite-temperature XC; `thermodynamics` with free
+  energy, internal energy, entropy, pressure, and their decomposition;
+  direct-G/Siegert DOS; SS23 Figs. 1-6 subset; low-temperature Al/Na/Fe cases.
+- Validation: `julia --project test/validation/m3.jl` (Figs. 1-6) and
+  `julia --project test/validation/m3.jl lowt` (low-temperature cases).
+- Remaining: the `:siegert` `N = 150` density repair is a separate milestone.
 
 ## Development
 

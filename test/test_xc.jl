@@ -32,7 +32,7 @@ function density_temperature(rs, t)
     return n, t * t_f
 end
 
-relative_l2(a, b) = sqrt(sum((a .- b) .^ 2) / sum(b .^ 2))
+xc_relative_l2(a, b) = sqrt(sum((a .- b) .^ 2) / sum(b .^ 2))
 
 @testset "XC: corrKSDT against libxc and limits" begin
     for (rs, t, f_ref, v_ref) in LIBXC_CORRKSDT
@@ -121,11 +121,11 @@ end
     # equivalent to it.
     base = average_atom(5.0, 10.0, 10.0, 0.2; N = 40, l_max = 4, xc = nothing)
     noxc = average_atom(5.0, 10.0, 10.0, 0.2; N = 40, l_max = 4, xc = NoXC())
-    @test relative_l2(noxc.density, base.density) < 1e-14
+    @test xc_relative_l2(noxc.density, base.density) < 1e-14
     @test maximum(abs.(noxc.potential .- base.potential)) < 1e-14
 
     sugar = average_atom(5.0, 10.0, 10.0, 0.2; N = 40, l_max = 4, xc = KSDT())
-    @test relative_l2(sugar.density, result.density) < 1e-14
+    @test xc_relative_l2(sugar.density, result.density) < 1e-14
     @test maximum(abs.(sugar.potential .- result.potential)) < 1e-14
 
     # A raw callable is potential-only and has no free energy.

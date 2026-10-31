@@ -1,8 +1,6 @@
 using Test
 using Siegert
 
-relative_l2(a, b) = sqrt(sum((a .- b) .^ 2) / sum(b .^ 2))
-
 # DOS electron number used by the thermodynamics neutrality check.
 function dos_electron_number(aa::AverageAtomResult; dos_cutoff = 1e-10)
     T = aa.temperature_eV / Siegert.HARTREE_TO_EV
@@ -131,7 +129,9 @@ end
     S_kB = Z * (π^2 / 2) * t
     F_kin = U_kin - T_Ha * S_kB
     F_H = 3 * Z^2 / (5 * R)
-    P_ref = (2 * U_kin + F_H) / (3 * V)
+    # The electron pressure is the continuum/free-electron decomposition:
+    # bound/core states do not contribute to the pressure virial.
+    P_ref = 2 * U_kin / (3 * V)
 
     println(
         "free-electron: U_kin = ",

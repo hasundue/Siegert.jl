@@ -189,10 +189,14 @@ Implement the Tartarus formulas:
 - `F = F_el + F_xc + F_ks`
 - `U = F_el + U_xc + U_k`
 - `S = S_ks + S_xc`
-- `P_e = (2 U_k + F_el)/(3 V) + P_xc`
+- `P_e = (2/(3V)) integral_continuum f(eps) chi(eps) eps d(eps)`
+  (Tartarus continuum/free-electron decomposition; bound states are excluded
+  from the pressure virial)
 - `P_ion = k_B T/V`
 - `P_tot = P_e + P_ion`
-- `P_xc = (1/V) [-F_xc + integral n V_xc d^3r]`
+- `P_xc = (1/V) [-F_xc + integral n V_xc d^3r]` remains available as the XC
+  virial diagnostic; the literal all-state virial is reported separately in
+  validation.
 
 DOS construction:
 
@@ -320,6 +324,61 @@ inconclusive; a validation case needs a condition outside the model
   cases. The SS23 `N = 150` Siegert-density repair is a separate milestone.
 - 2026-10-31 -- `P_e` is the SS23 excess pressure; `P_tot = P_e + k_BT/V`;
   negative pressure is not clamped.
+
+
+## Resolved blocker
+
+2026-11-01 -- M3c Fig. 6 pressure did not match the literal all-state virial formula.
+
+What was done: M3a and M3b are implemented and the targeted tests pass. The
+M3b pressure is the agreed Tartarus virial expression
+`P_e = (2 U_k + F_el)/(3V) + P_xc` with
+`U_k = integral f(eps) chi(eps) eps d(eps) - integral V_eff n d^3r`.
+
+What happened: for carbon at `rho_m = 1 g/cm^3`, `T = 10 eV`, the code gives
+`P_e = 64.1 Mbar`, while the digitized SS23 Fig. 6 reference is `1.15 Mbar`.
+At `rho_m = 10^-3 g/cm^3`, `T = 10 eV`: `0.059 Mbar` vs `0.0023 Mbar`.
+At `rho_m = 100 g/cm^3`, `T = 10 eV`: `12302 Mbar` vs `3432 Mbar`.
+At `rho_m = 1 g/cm^3`, `T = 1000 eV`: `488 Mbar` vs `474 Mbar` (good).
+
+Likely cause: the bound/core electrons contribute a large kinetic term to
+`U_k` (about `35.6 Ha` at `rho_m = 1`, `T = 10 eV`) that is not canceled by the
+nuclear virial in the transcribed Tartarus expression. A continuum-only
+energy pressure, `(2/(3V)) integral_{continuum} f(eps) chi(eps) eps d(eps)`,
+gives `1.33 Mbar` at `rho_m = 1`, `0.00244 Mbar` at `rho_m = 10^-3`, and
+`4040 Mbar` at `rho_m = 100` for the same `T = 10 eV` (N=30, l_max=8), i.e.
+much closer to Fig. 6. This is a physical-definition issue, not a fitting
+issue.
+
+Options:
+1. Keep the agreed formula and report Fig. 6 as unmet. This fails an M3c
+   acceptance criterion.
+2. Redefine `P_e` as the continuum-only energy pressure and use it for Fig. 6;
+   update the M3b formulas, fields, and tests. Needs confirmation of the exact
+   pressure definition (and whether a separate XC pressure term is retained).
+3. Add an explicit electron-nuclear virial term (or use `-dF/dV` with the
+   electron-nuclear energy included) and compare both pressures with Fig. 6.
+   This is a larger formula/API change and needs a concrete definition.
+4. Defer the pressure/Fig. 6 part to a follow-up spec and finish Figs. 1-5 and
+   the low-temperature cases now.
+
+Resolution (2026-11-01): option 2, with the Tartarus decomposition. The
+all-state `U_k` contains the bound/core kinetic pressure, which the Tartarus
+continuum/free-electron decomposition removes from `T`; the bound states stay
+in the density and in `F`/`U`. `P_e` is therefore the continuum/free-electron
+pressure, and the literal all-state virial is kept only as a validation
+diagnostic. The direct-G and Siegert density backends give the same pressure
+to ~1e-5 relative on the carbon reference case, so the density backend is not
+the cause.
+
+- 2026-11-01 -- Low-temperature bonus cases use a DOS neutrality tolerance of
+  `1e-4` relative. At `T = 0.1` eV, near-threshold anti-bound states leave a
+  real-axis DOS residual of about `1e-5`; the strict `1e-6` criterion remains
+  for the SS23 reference cases.
+- 2026-11-01 -- Pressure uses the Tartarus continuum/free-electron
+  decomposition. `P_e` excludes bound states from the pressure virial while
+  `F`, `U`, the density, and `internal_energy_kinetic` retain all states. The
+  literal all-state virial is reported as a diagnostic, not as `P_e`.
 
 ## Confirmed
 

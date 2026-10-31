@@ -1550,11 +1550,14 @@ noted otherwise.
 Fields (internal Hartree/Bohr units):
 - `free_energy`, `internal_energy`: Ha/atom
 - `entropy`: Ha/K/atom
-- `electron_pressure`, `ion_ideal_pressure`, `total_pressure`: Ha/bohr^3
+- `electron_pressure`, `ion_ideal_pressure`, `total_pressure`: Ha/bohr^3.
+  `electron_pressure` is the Tartarus continuum/free-electron pressure: bound
+  states are excluded from the pressure virial.
 - `free_energy_electrostatic`, `free_energy_xc`: Ha/atom
-- `internal_energy_kinetic`: Ha/atom
+- `internal_energy_kinetic`: Ha/atom, the all-state `U_k` used in `F` and `U`
 - `entropy_ks`, `entropy_xc`: Ha/K/atom
-- `pressure_xc`: Ha/bohr^3
+- `pressure_xc`: Ha/bohr^3, the XC virial diagnostic used by the literal
+  all-state virial sum
 
 Convenience properties: `free_energy_eV`, `internal_energy_eV` (eV/atom),
 `entropy_kB` (`k_B`/atom), `electron_pressure_GPa`, `total_pressure_GPa`.
@@ -1814,6 +1817,13 @@ internal energy (Ha), entropy (Ha/K), and electron/ion/total pressure
 (Ha/bohr^3), with the decomposition into electrostatic, kinetic, and
 exchange-correlation terms.
 
+The pressure uses the Tartarus continuum/free-electron decomposition,
+`P_e = 2 U_k^continuum / (3V)`: bound states are retained in the density and in
+`F`/`U`, but their core kinetic pressure is not part of the electron pressure.
+The literal all-state virial expression can be reconstructed from
+`internal_energy_kinetic`, `free_energy_electrostatic`, and `pressure_xc`; the
+validation script reports the difference.
+
 The XC model must provide a free energy (`xc_free_energy`); a potential-only
 model throws `ArgumentError`. The continuum DOS is the Siegert DOS for the
 `:siegert` backend and the direct-G DOS for the `:direct_green` backend. The
@@ -1927,7 +1937,11 @@ function thermodynamics(
     F = F_el + F_xc + F_ks
     U = F_el + U_xc + U_k
     S = S_ks + S_xc
-    P_e = (2U_k + F_el) / (3V) + P_xc
+    # Tartarus uses the continuum/free-electron decomposition for the pressure
+    # virial. Bound states are kept in the density and in F/U, but their core
+    # kinetic pressure is not part of the electron pressure; it is canceled by
+    # the nuclear virial in the continuum/free decomposition.
+    P_e = 2 * U_kin_continuum / (3V)
     P_ion = T_Ha / V
     P_tot = P_e + P_ion
 
