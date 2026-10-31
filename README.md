@@ -79,10 +79,11 @@ the input for the self-consistent loop.
 - `thermodynamics(aa)` returns `ThermodynamicProperties`: free energy,
   internal energy, entropy, and electron/ion/total pressure, decomposed into
   electrostatic, kinetic, and XC terms.
-- The pressure uses the Tartarus continuum/free-electron decomposition:
+- The electron pressure is the excess pressure (total minus the ideal-ion
+  contribution) from the Tartarus continuum/free-electron decomposition:
   bound/core states stay in the density and in `F`/`U`, but they are excluded
-  from the pressure virial. The literal all-state virial is available as a
-  diagnostic through the decomposition fields.
+  from the pressure virial. The literal all-state virial is a diagnostic
+  quantity, not an alternative definition of the excess pressure.
 - DOS construction uses bound states below `E_min`, a real-axis continuum
   integral, and the analytic free tail for \(l > l_{\max}\).
 
@@ -172,9 +173,6 @@ References:
 - The direct backend's self-consistency threshold is `1e-4` Ha (the physical
   target); the μ solve is a safeguarded secant with `mu_tolerance = 1e-10`
   Ha absolute.
-- The pressure is the Tartarus continuum/free-electron pressure; the literal
-  all-state virial differs strongly at low temperature because it retains the
-  bound/core kinetic term.
 - Low-temperature (`T ~ 0.1 eV`) Al/Na DOS neutrality is limited to about
   `1e-5` relative by near-threshold anti-bound states; the SS23 reference cases
   meet `1e-6`.

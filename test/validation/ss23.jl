@@ -281,7 +281,7 @@ function validate_ss23()
                 P_ref,
                 " Mbar, rel=",
                 round((P - P_ref) / P_ref; sigdigits = 3),
-                ", all-state virial=",
+                ", all-state virial (diagnostic)=",
                 round(P_vir; sigdigits = 5),
                 " Mbar",
             )
